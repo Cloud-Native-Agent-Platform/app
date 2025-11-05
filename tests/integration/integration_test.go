@@ -26,8 +26,12 @@ func TestMain(m *testing.M) {
 // setupIntegrationEnvironment는 통합 테스트 환경을 초기화합니다.
 func setupIntegrationEnvironment() error {
 	// 통합 테스트용 환경 변수 설정
-	os.Setenv("ENV", "integration")
-	os.Setenv("LOG_LEVEL", "info")
+	if err := os.Setenv("ENV", "integration"); err != nil {
+		return err
+	}
+	if err := os.Setenv("LOG_LEVEL", "info"); err != nil {
+		return err
+	}
 
 	// 테스트 컨테이너 또는 외부 서비스 설정
 	// 예: 데이터베이스, 캐시, 메시지 큐 등
@@ -37,8 +41,12 @@ func setupIntegrationEnvironment() error {
 // teardownIntegrationEnvironment는 통합 테스트 환경을 정리합니다.
 func teardownIntegrationEnvironment() {
 	// 테스트 컨테이너 또는 외부 서비스 정리
-	os.Unsetenv("ENV")
-	os.Unsetenv("LOG_LEVEL")
+	if err := os.Unsetenv("ENV"); err != nil {
+		panic("환경 변수 제거 실패 (ENV): " + err.Error())
+	}
+	if err := os.Unsetenv("LOG_LEVEL"); err != nil {
+		panic("환경 변수 제거 실패 (LOG_LEVEL): " + err.Error())
+	}
 }
 
 // TestEndToEndWorkflow는 전체 워크플로우를 테스트합니다.

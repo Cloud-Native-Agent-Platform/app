@@ -24,15 +24,23 @@ func TestMain(m *testing.M) {
 // setupTestEnvironment는 테스트 환경을 초기화합니다.
 func setupTestEnvironment() {
 	// 테스트용 환경 변수 설정
-	_ = os.Setenv("ENV", "test")
-	_ = os.Setenv("LOG_LEVEL", "debug")
+	if err := os.Setenv("ENV", "test"); err != nil {
+		panic("환경 변수 설정 실패 (ENV): " + err.Error())
+	}
+	if err := os.Setenv("LOG_LEVEL", "debug"); err != nil {
+		panic("환경 변수 설정 실패 (LOG_LEVEL): " + err.Error())
+	}
 }
 
 // teardownTestEnvironment는 테스트 환경을 정리합니다.
 func teardownTestEnvironment() {
 	// 테스트 환경 변수 제거
-	_ = os.Unsetenv("ENV")
-	_ = os.Unsetenv("LOG_LEVEL")
+	if err := os.Unsetenv("ENV"); err != nil {
+		panic("환경 변수 제거 실패 (ENV): " + err.Error())
+	}
+	if err := os.Unsetenv("LOG_LEVEL"); err != nil {
+		panic("환경 변수 제거 실패 (LOG_LEVEL): " + err.Error())
+	}
 }
 
 // TestApplicationLifecycle은 애플리케이션의 전체 생명주기를 테스트합니다.
@@ -52,7 +60,9 @@ func TestApplicationLifecycle(t *testing.T) {
 		{
 			name: "잘못된 설정으로 인한 시작 실패",
 			setup: func() {
-				_ = os.Setenv("CONFIG_PATH", "/nonexistent/path")
+				if err := os.Setenv("CONFIG_PATH", "/nonexistent/path"); err != nil {
+					panic("환경 변수 설정 실패 (CONFIG_PATH): " + err.Error())
+				}
 			},
 			wantErr: true,
 		},
@@ -130,4 +140,3 @@ func BenchmarkApplicationStartup(b *testing.B) {
 		// 실제 시작 로직은 구현하지 않음
 	}
 }
-

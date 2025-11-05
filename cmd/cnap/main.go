@@ -32,9 +32,9 @@ func main() {
 	defer logger.Sync()
 
 	rootCmd := &cobra.Command{
-		Use:   "cnap",
-		Short: "CNAP - AI Agent Supervisor CLI",
-		Long:  `CNAP is a command-line interface for managing AI agent supervisor and connector servers.`,
+		Use:     "cnap",
+		Short:   "CNAP - AI Agent Supervisor CLI",
+		Long:    `CNAP is a command-line interface for managing AI agent supervisor and connector servers.`,
 		Version: fmt.Sprintf("%s (built at %s)", Version, BuildTime),
 	}
 
@@ -173,11 +173,11 @@ func runStart(logger *zap.Logger) error {
 	defer shutdownCancel()
 
 	shutdownErrChan := make(chan error, 2)
-	
+
 	go func() {
 		shutdownErrChan <- supervisorServer.Stop(shutdownCtx)
 	}()
-	
+
 	go func() {
 		shutdownErrChan <- connectorServer.Stop(shutdownCtx)
 	}()
@@ -211,7 +211,7 @@ func runAgent(logger *zap.Logger, agent, name, prompt string) error {
 	defer cancel()
 
 	r := runner.NewRunner(logger.Named("runner"))
-	
+
 	result, err := r.RunWithResult(ctx, agent, name, prompt)
 	if err != nil {
 		logger.Error("Failed to run agent", zap.Error(err))
@@ -242,7 +242,7 @@ func createAgent(logger *zap.Logger, agent string) error {
 	defer cancel()
 
 	ctrl := controller.NewController(logger.Named("controller"))
-	
+
 	// 에이전트 이름 검증
 	if err := ctrl.ValidateAgent(agent); err != nil {
 		logger.Error("Invalid agent name", zap.Error(err))

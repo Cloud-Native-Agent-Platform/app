@@ -42,7 +42,7 @@ func (s *Server) Start(ctx context.Context) error {
 // Stop은 connector 서버를 정상적으로 종료합니다.
 func (s *Server) Stop(ctx context.Context) error {
 	s.logger.Info("Stopping connector server")
-	
+
 	// 정리 작업 수행
 	select {
 	case <-ctx.Done():
