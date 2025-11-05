@@ -48,6 +48,17 @@ func main() {
 		},
 	}
 
+	// health 명령어
+	healthCmd := &cobra.Command{
+		Use:   "health",
+		Short: "Check application health status",
+		Long:  `Check if the application is running and healthy.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("OK")
+			return nil
+		},
+	}
+
 	// agent 명령어 그룹
 	agentCmd := &cobra.Command{
 		Use:   "agent",
@@ -85,6 +96,7 @@ func main() {
 	agentCmd.AddCommand(agentRunCmd)
 	agentCmd.AddCommand(agentCreateCmd)
 	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(agentCmd)
 
 	if err := rootCmd.Execute(); err != nil {

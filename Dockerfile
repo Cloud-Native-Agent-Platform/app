@@ -29,10 +29,18 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:3.19
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates tzdata && \
-    addgroup -g 1000 appuser && \
-    adduser -D -u 1000 -G appuser appuser
+# Install PostgreSQL and other dependencies
+RUN apk --no-cache add \
+    ca-certificates \
+    tzdata \
+    postgresql \
+    postgresql-contrib \
+    bash \
+    su-exec
+
+# Create directories
+RUN mkdir -p /var/lib/postgresql/data /app /run/postgresql && \
+    chown -R postgres:postgres /var/lib/postgresql /run/postgresql
 
 # Set working directory
 WORKDIR /app
@@ -41,18 +49,16 @@ WORKDIR /app
 COPY --from=builder /build/cnap .
 COPY --from=builder /build/configs ./configs
 
-# Change ownership
-RUN chown -R appuser:appuser /app
+# Copy startup script
+COPY docker/start.sh /start.sh
+RUN chmod +x /start.sh
 
-# Switch to non-root user
-USER appuser
-
-# Expose port if needed (adjust as necessary)
-# EXPOSE 8080
+# Expose PostgreSQL port
+EXPOSE 5432
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/app/cnap", "--health-check"] || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["/app/cnap", "health"]
 
-# Run the application
-ENTRYPOINT ["/app/cnap"]
+# Run the startup script
+ENTRYPOINT ["/start.sh"]
