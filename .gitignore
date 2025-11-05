@@ -45,6 +45,9 @@ tmp/
 temp/
 *.tmp
 
+# Docker/PostgreSQL 데이터 디렉토리
+docker-data/
+
 # Debug files
 debug
 __debug_bin
