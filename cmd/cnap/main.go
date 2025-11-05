@@ -12,7 +12,6 @@ import (
 	"github.com/cnap-oss/app/internal/connector"
 	"github.com/cnap-oss/app/internal/controller"
 	"github.com/cnap-oss/app/internal/runner"
-	"github.com/cnap-oss/app/internal/supervisor"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -41,8 +40,8 @@ func main() {
 	// start 명령어
 	startCmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start supervisor and connector server processes",
-		Long:  `Start the server processes for internal/supervisor and internal/connector.`,
+		Short: "Start controller and connector server processes",
+		Long:  `Start the server processes for internal/controller and internal/connector.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStart(logger)
 		},
@@ -116,7 +115,7 @@ func initLogger() (*zap.Logger, error) {
 	return config.Build()
 }
 
-// runStart는 supervisor와 connector 서버를 시작합니다.
+// runStart는 controller와 connector 서버를 시작합니다.
 func runStart(logger *zap.Logger) error {
 	logger.Info("Starting CNAP servers",
 		zap.String("version", Version),
@@ -132,19 +131,19 @@ func runStart(logger *zap.Logger) error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// 서버 인스턴스 생성
-	supervisorServer := supervisor.NewServer(logger.Named("supervisor"))
+	controllerServer := controller.NewController(logger.Named("controller"))
 	connectorServer := connector.NewServer(logger.Named("connector"))
 
 	// 에러 채널
 	errChan := make(chan error, 2)
 	var wg sync.WaitGroup
 
-	// Supervisor 서버 시작
+	// Controller 서버 시작
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := supervisorServer.Start(ctx); err != nil && err != context.Canceled {
-			errChan <- fmt.Errorf("supervisor error: %w", err)
+		if err := controllerServer.Start(ctx); err != nil && err != context.Canceled {
+			errChan <- fmt.Errorf("controller error: %w", err)
 		}
 	}()
 
@@ -175,7 +174,7 @@ func runStart(logger *zap.Logger) error {
 	shutdownErrChan := make(chan error, 2)
 
 	go func() {
-		shutdownErrChan <- supervisorServer.Stop(shutdownCtx)
+		shutdownErrChan <- controllerServer.Stop(shutdownCtx)
 	}()
 
 	go func() {
