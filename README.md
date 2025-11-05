@@ -7,9 +7,8 @@ cnap-app/
 ├── cmd/                  # 메인 애플리케이션
 ├── internal/             # 내부 패키지
 │   ├── connector/             # Discord 봇
-│   ├── controller/       # 컨테이너 관리
-│   ├── runner/          # OpenCode 러너
-│   └── supervisor/          # 전체 상태 관리
+│   ├── controller/       # 에이전트 관리 및 서버 제어
+│   └── runner/          # OpenCode 러너
 ├── go.mod
 ├── Makefile
 └── README.md
