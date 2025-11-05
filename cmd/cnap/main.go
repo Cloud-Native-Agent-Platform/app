@@ -5,9 +5,15 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
+	"github.com/cnap-oss/app/internal/connector"
+	"github.com/cnap-oss/app/internal/controller"
+	"github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/supervisor"
+	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
 
@@ -25,41 +31,66 @@ func main() {
 	}
 	defer logger.Sync()
 
-	logger.Info("Starting application", 
-		zap.String("version", Version),
-		zap.String("build_time", BuildTime),
-	)
-
-	// Context 생성
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Graceful shutdown을 위한 signal 처리
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-
-	// 메인 애플리케이션 로직 실행
-	go func() {
-		if err := run(ctx, logger); err != nil {
-			logger.Error("Application error", zap.Error(err))
-			cancel()
-		}
-	}()
-
-	// Shutdown signal 대기
-	<-sigChan
-	logger.Info("Shutdown signal received")
-
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	if err := shutdown(shutdownCtx, logger); err != nil {
-		logger.Error("Shutdown error", zap.Error(err))
-		os.Exit(1)
+	rootCmd := &cobra.Command{
+		Use:   "cnap",
+		Short: "CNAP - AI Agent Supervisor CLI",
+		Long:  `CNAP is a command-line interface for managing AI agent supervisor and connector servers.`,
+		Version: fmt.Sprintf("%s (built at %s)", Version, BuildTime),
 	}
 
-	logger.Info("Application stopped gracefully")
+	// start 명령어
+	startCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start supervisor and connector server processes",
+		Long:  `Start the server processes for internal/supervisor and internal/connector.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStart(logger)
+		},
+	}
+
+	// agent 명령어 그룹
+	agentCmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Agent operations",
+		Long:  `Commands for managing and running agents.`,
+	}
+
+	// agent run 명령어
+	agentRunCmd := &cobra.Command{
+		Use:   "run <agent> <name> <prompt>",
+		Short: "Run an agent",
+		Long:  `Run a specified agent with given name and prompt`,
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agent := args[0]
+			name := args[1]
+			prompt := args[2]
+			return runAgent(logger, agent, name, prompt)
+		},
+	}
+
+	// agent create 명령어
+	agentCreateCmd := &cobra.Command{
+		Use:   "create <agent>",
+		Short: "Agent",
+		Long:  `Create a new agent`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			agent := args[0]
+			return createAgent(logger, agent)
+		},
+	}
+
+	// 명령어 구성
+	agentCmd.AddCommand(agentRunCmd)
+	agentCmd.AddCommand(agentCreateCmd)
+	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(agentCmd)
+
+	if err := rootCmd.Execute(); err != nil {
+		logger.Error("Command execution failed", zap.Error(err))
+		os.Exit(1)
+	}
 }
 
 // initLogger는 zap logger를 초기화합니다.
@@ -85,28 +116,145 @@ func initLogger() (*zap.Logger, error) {
 	return config.Build()
 }
 
-// run은 애플리케이션의 메인 로직을 실행합니다.
-func run(ctx context.Context, logger *zap.Logger) error {
-	logger.Info("Application running")
+// runStart는 supervisor와 connector 서버를 시작합니다.
+func runStart(logger *zap.Logger) error {
+	logger.Info("Starting CNAP servers",
+		zap.String("version", Version),
+		zap.String("build_time", BuildTime),
+	)
 
-	// 메인 로직 (여기서는 간단히 context 취소를 대기)
-	<-ctx.Done()
-	return ctx.Err()
+	// Context 생성
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Graceful shutdown을 위한 signal 처리
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// 서버 인스턴스 생성
+	supervisorServer := supervisor.NewServer(logger.Named("supervisor"))
+	connectorServer := connector.NewServer(logger.Named("connector"))
+
+	// 에러 채널
+	errChan := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	// Supervisor 서버 시작
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := supervisorServer.Start(ctx); err != nil && err != context.Canceled {
+			errChan <- fmt.Errorf("supervisor error: %w", err)
+		}
+	}()
+
+	// Connector 서버 시작
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := connectorServer.Start(ctx); err != nil && err != context.Canceled {
+			errChan <- fmt.Errorf("connector error: %w", err)
+		}
+	}()
+
+	// 종료 대기
+	select {
+	case <-sigChan:
+		logger.Info("Shutdown signal received")
+		cancel()
+	case err := <-errChan:
+		logger.Error("Server error", zap.Error(err))
+		cancel()
+		return err
+	}
+
+	// Graceful shutdown
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	shutdownErrChan := make(chan error, 2)
+	
+	go func() {
+		shutdownErrChan <- supervisorServer.Stop(shutdownCtx)
+	}()
+	
+	go func() {
+		shutdownErrChan <- connectorServer.Stop(shutdownCtx)
+	}()
+
+	// 모든 고루틴이 종료될 때까지 대기
+	go func() {
+		wg.Wait()
+		close(errChan)
+	}()
+
+	// Shutdown 에러 확인
+	for i := 0; i < 2; i++ {
+		if err := <-shutdownErrChan; err != nil {
+			logger.Error("Shutdown error", zap.Error(err))
+		}
+	}
+
+	logger.Info("Servers stopped gracefully")
+	return nil
 }
 
-// shutdown은 애플리케이션을 정상적으로 종료합니다.
-func shutdown(ctx context.Context, logger *zap.Logger) error {
-	logger.Info("Starting graceful shutdown")
+// runAgent는 에이전트를 실행합니다.
+func runAgent(logger *zap.Logger, agent, name, prompt string) error {
+	logger.Info("Running agent",
+		zap.String("agent", agent),
+		zap.String("name", name),
+		zap.String("prompt", prompt),
+	)
 
-	// 여기에 cleanup 로직 추가
-	// 예: 데이터베이스 연결 종료, 진행 중인 작업 완료 등
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 
-	select {
-	case <-ctx.Done():
-		logger.Warn("Shutdown timeout exceeded")
-		return ctx.Err()
-	case <-time.After(100 * time.Millisecond):
-		logger.Info("Shutdown completed")
-		return nil
+	r := runner.NewRunner(logger.Named("runner"))
+	
+	result, err := r.RunWithResult(ctx, agent, name, prompt)
+	if err != nil {
+		logger.Error("Failed to run agent", zap.Error(err))
+		return err
 	}
+
+	if result.Success {
+		fmt.Printf("✓ Agent executed successfully\n")
+		fmt.Printf("Output: %s\n", result.Output)
+	} else {
+		fmt.Printf("✗ Agent execution failed\n")
+		if result.Error != nil {
+			fmt.Printf("Error: %s\n", result.Error.Error())
+		}
+		return fmt.Errorf("agent execution failed")
+	}
+
+	return nil
+}
+
+// createAgent는 새로운 에이전트를 생성합니다.
+func createAgent(logger *zap.Logger, agent string) error {
+	logger.Info("Creating agent",
+		zap.String("agent", agent),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	ctrl := controller.NewController(logger.Named("controller"))
+	
+	// 에이전트 이름 검증
+	if err := ctrl.ValidateAgent(agent); err != nil {
+		logger.Error("Invalid agent name", zap.Error(err))
+		return err
+	}
+
+	// 에이전트 생성
+	if err := ctrl.CreateAgent(ctx, agent); err != nil {
+		logger.Error("Failed to create agent", zap.Error(err))
+		return err
+	}
+
+	fmt.Printf("✓ Agent '%s' created successfully\n", agent)
+	return nil
 }
