@@ -12,6 +12,7 @@ import (
 	"github.com/cnap-oss/app/internal/connector"
 	"github.com/cnap-oss/app/internal/controller"
 	"github.com/cnap-oss/app/internal/runner"
+	"github.com/cnap-oss/app/internal/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -122,6 +123,13 @@ func runStart(logger *zap.Logger) error {
 		zap.String("build_time", BuildTime),
 	)
 
+	repo, cleanup, err := initStorage(logger)
+	if err != nil {
+		logger.Error("Failed to initialize storage", zap.Error(err))
+		return err
+	}
+	defer cleanup()
+
 	// Context 생성
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -131,7 +139,7 @@ func runStart(logger *zap.Logger) error {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// 서버 인스턴스 생성
-	controllerServer := controller.NewController(logger.Named("controller"))
+	controllerServer := controller.NewController(logger.Named("controller"), repo)
 	connectorServer := connector.NewServer(logger.Named("connector"))
 
 	// 에러 채널
@@ -240,7 +248,12 @@ func createAgent(logger *zap.Logger, agent string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	ctrl := controller.NewController(logger.Named("controller"))
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		logger.Error("Failed to initialize controller", zap.Error(err))
+		return err
+	}
+	defer cleanup()
 
 	// 에이전트 이름 검증
 	if err := ctrl.ValidateAgent(agent); err != nil {
@@ -256,4 +269,45 @@ func createAgent(logger *zap.Logger, agent string) error {
 
 	fmt.Printf("✓ Agent '%s' created successfully\n", agent)
 	return nil
+}
+
+func initStorage(logger *zap.Logger) (*storage.Repository, func(), error) {
+	cfg, err := storage.ConfigFromEnv()
+	if err != nil {
+		return nil, func() {}, err
+	}
+
+	db, err := storage.Open(cfg)
+	if err != nil {
+		return nil, func() {}, err
+	}
+
+	if err := storage.AutoMigrate(db); err != nil {
+		_ = storage.Close(db)
+		return nil, func() {}, err
+	}
+
+	repo, err := storage.NewRepository(db)
+	if err != nil {
+		_ = storage.Close(db)
+		return nil, func() {}, err
+	}
+
+	cleanup := func() {
+		if err := storage.Close(db); err != nil {
+			logger.Warn("Failed to close storage", zap.Error(err))
+		}
+	}
+
+	return repo, cleanup, nil
+}
+
+func newController(logger *zap.Logger) (*controller.Controller, func(), error) {
+	repo, cleanup, err := initStorage(logger)
+	if err != nil {
+		return nil, func() {}, err
+	}
+
+	ctrl := controller.NewController(logger.Named("controller"), repo)
+	return ctrl, cleanup, nil
 }
