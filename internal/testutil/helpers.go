@@ -138,7 +138,9 @@ func SetupTestEnvironment(t *testing.T, envVars map[string]string) {
 
 	t.Cleanup(func() {
 		for key := range envVars {
-			_ = os.Unsetenv(key)
+			if err := os.Unsetenv(key); err != nil {
+				t.Errorf("환경 변수 제거 실패 (%s): %v", key, err)
+			}
 		}
 	})
 }
