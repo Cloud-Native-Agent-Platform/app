@@ -160,7 +160,9 @@ func (s *Server) messageCreateHandler(_ *discordgo.Session, m *discordgo.Message
 		s.agentsMutex.RUnlock()
 
 		if !agentOk {
-			s.session.ChannelMessageSend(m.ChannelID, "오류: 이 스레드에 연결된 에이전트를 찾을 수 없습니다.")
+			if _, err := s.session.ChannelMessageSend(m.ChannelID, "오류: 이 스레드에 연결된 에이전트를 찾을 수 없습니다."); err != nil {
+				s.logger.Error("Failed to send error message to channel", zap.Error(err), zap.String("channel_id", m.ChannelID))
+			}
 			return
 		}
 		s.callAgentInThread(m.Message, agent)
@@ -250,7 +252,9 @@ func (s *Server) handleAutocomplete(i *discordgo.InteractionCreate) {
 				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: name, Value: name})
 			}
 		}
-		s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionApplicationCommandAutocompleteResult, Data: &discordgo.InteractionResponseData{Choices: choices}})
+		if err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionApplicationCommandAutocompleteResult, Data: &discordgo.InteractionResponseData{Choices: choices}}); err != nil {
+			s.logger.Error("Failed to send autocomplete response", zap.Error(err))
+		}
 	}
 }
 
@@ -293,13 +297,17 @@ func (s *Server) startAgentThread(i *discordgo.InteractionCreate, agentName stri
 			{Name: "역할 정의 (프롬프트)", Value: fmt.Sprintf("```\n%s\n```", agent.Prompt), Inline: false},
 		},
 	}
-	s.session.ChannelMessageSendEmbed(thread.ID, embed)
+	if _, err := s.session.ChannelMessageSendEmbed(thread.ID, embed); err != nil {
+		s.logger.Error("Failed to send initial thread message", zap.Error(err), zap.String("thread_id", thread.ID))
+	}
 }
 
 // callAgentInThread는 활성화된 에이전트 스레드 내에서 메시지를 처리합니다.
 func (s *Server) callAgentInThread(m *discordgo.Message, agent *Agent) {
 	if m.Content == "안녕!" {
-		s.session.ChannelMessageSend(m.ChannelID, "안녕하세요!")
+		if _, err := s.session.ChannelMessageSend(m.ChannelID, "안녕하세요!"); err != nil {
+			s.logger.Error("Failed to send greeting message", zap.Error(err), zap.String("channel_id", m.ChannelID))
+		}
 		return
 	}
 
@@ -309,7 +317,9 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *Agent) {
 		Color:       0x0099ff, // Blue
 		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("'%s'에게 전달됨 (실행 기능은 미구현)", agent.Name)},
 	}
-	s.session.ChannelMessageSendEmbed(m.ChannelID, embed)
+	if _, err := s.session.ChannelMessageSendEmbed(m.ChannelID, embed); err != nil {
+		s.logger.Error("Failed to send agent response embed", zap.Error(err), zap.String("channel_id", m.ChannelID))
+	}
 }
 
 // showAgentList는 현재 등록된 모든 에이전트의 목록을 Discord에 표시합니다.
