@@ -29,36 +29,35 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:3.19
 
-# Install PostgreSQL and other dependencies
+# Install runtime dependencies only
 RUN apk --no-cache add \
     ca-certificates \
-    tzdata \
-    postgresql \
-    postgresql-contrib \
-    bash \
-    su-exec
+    tzdata
 
-# Create directories
-RUN mkdir -p /var/lib/postgresql/data /app /run/postgresql && \
-    chown -R postgres:postgres /var/lib/postgresql /run/postgresql
+# Create non-root user
+RUN addgroup -g 1000 cnap && \
+    adduser -D -u 1000 -G cnap cnap
 
 # Set working directory
 WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /build/cnap .
-COPY --from=builder /build/configs ./configs
 
-# Copy startup script
-COPY docker/start.sh /start.sh
-RUN chmod +x /start.sh
+# Copy configs if they exist
+COPY --from=builder /build/configs ./configs 2>/dev/null || true
 
-# Expose PostgreSQL port
-EXPOSE 5432
+# Create data directory for SQLite
+RUN mkdir -p /app/data && \
+    chown -R cnap:cnap /app
+
+# Switch to non-root user
+USER cnap
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["/app/cnap", "health"]
 
-# Run the startup script
-ENTRYPOINT ["/start.sh"]
+# Run the application
+ENTRYPOINT ["/app/cnap"]
+CMD ["start"]
