@@ -2,21 +2,26 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // Controller는 에이전트 생성 및 관리를 담당하며, supervisor 기능도 포함합니다.
 type Controller struct {
 	logger *zap.Logger
+	repo   *storage.Repository
 }
 
 // NewController는 새로운 Controller를 생성합니다.
-func NewController(logger *zap.Logger) *Controller {
+func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 	return &Controller{
 		logger: logger,
+		repo:   repo,
 	}
 }
 
@@ -59,16 +64,25 @@ func (c *Controller) CreateAgent(ctx context.Context, agent string) error {
 		zap.String("agent", agent),
 	)
 
-	// 더미 생성 - 실제 구현 시 여기에 에이전트 생성 로직 추가
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(1 * time.Second):
-		c.logger.Info("Agent created successfully",
-			zap.String("agent", agent),
-		)
-		return nil
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
 	}
+
+	payload := &storage.Agent{
+		AgentID: agent,
+		Status:  storage.AgentStatusActive,
+	}
+
+	if err := c.repo.CreateAgent(ctx, payload); err != nil {
+		c.logger.Error("Failed to persist agent", zap.Error(err))
+		return err
+	}
+
+	c.logger.Info("Agent created successfully",
+		zap.String("agent", agent),
+		zap.Int64("id", payload.ID),
+	)
+	return nil
 }
 
 // DeleteAgent는 기존 에이전트를 삭제합니다.
@@ -77,37 +91,42 @@ func (c *Controller) DeleteAgent(ctx context.Context, agent string) error {
 		zap.String("agent", agent),
 	)
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(500 * time.Millisecond):
-		c.logger.Info("Agent deleted successfully",
-			zap.String("agent", agent),
-		)
-		return nil
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
 	}
+
+	if err := c.repo.UpsertAgentStatus(ctx, agent, storage.AgentStatusDeleted); err != nil {
+		return err
+	}
+
+	c.logger.Info("Agent deleted successfully",
+		zap.String("agent", agent),
+	)
+	return nil
 }
 
 // ListAgents는 모든 에이전트 목록을 반환합니다.
 func (c *Controller) ListAgents(ctx context.Context) ([]string, error) {
 	c.logger.Info("Listing agents")
 
-	// 더미 목록
-	agents := []string{
-		"agent-1",
-		"agent-2",
-		"agent-3",
+	if c.repo == nil {
+		return nil, fmt.Errorf("controller: repository is not configured")
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(500 * time.Millisecond):
-		c.logger.Info("Listed agents",
-			zap.Int("count", len(agents)),
-		)
-		return agents, nil
+	records, err := c.repo.ListAgents(ctx)
+	if err != nil {
+		return nil, err
 	}
+
+	agents := make([]string, 0, len(records))
+	for _, rec := range records {
+		agents = append(agents, rec.AgentID)
+	}
+
+	c.logger.Info("Listed agents",
+		zap.Int("count", len(agents)),
+	)
+	return agents, nil
 }
 
 // AgentInfo는 에이전트 정보를 나타냅니다.
@@ -123,22 +142,29 @@ func (c *Controller) GetAgentInfo(ctx context.Context, agent string) (*AgentInfo
 		zap.String("agent", agent),
 	)
 
-	info := &AgentInfo{
-		Name:      agent,
-		Status:    "active",
-		CreatedAt: time.Now().Add(-24 * time.Hour),
+	if c.repo == nil {
+		return nil, fmt.Errorf("controller: repository is not configured")
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(300 * time.Millisecond):
-		c.logger.Info("Retrieved agent info",
-			zap.String("agent", agent),
-			zap.String("status", info.Status),
-		)
-		return info, nil
+	rec, err := c.repo.GetAgent(ctx, agent)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("agent not found: %s", agent)
+		}
+		return nil, err
 	}
+
+	info := &AgentInfo{
+		Name:      rec.AgentID,
+		Status:    rec.Status,
+		CreatedAt: rec.CreatedAt,
+	}
+
+	c.logger.Info("Retrieved agent info",
+		zap.String("agent", agent),
+		zap.String("status", info.Status),
+	)
+	return info, nil
 }
 
 // ValidateAgent는 에이전트 이름의 유효성을 검증합니다.

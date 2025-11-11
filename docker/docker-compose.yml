@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cnap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cnap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnap}
+      POSTGRES_DB: ${POSTGRES_DB:-cnap}
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cnap}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cnap-network
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: cnap-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cnap}:${POSTGRES_PASSWORD:-cnap}@postgres:5432/${POSTGRES_DB:-cnap}?sslmode=disable
+      ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+    volumes:
+      - app_data:/app/data
+    networks:
+      - cnap-network
+
+volumes:
+  postgres_data:
+    driver: local
+  app_data:
+    driver: local
+
+networks:
+  cnap-network:
+    driver: bridge

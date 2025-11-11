@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install necessary build tools
 RUN apk add --no-cache git ca-certificates tzdata
@@ -29,30 +29,35 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:3.19
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates tzdata && \
-    addgroup -g 1000 appuser && \
-    adduser -D -u 1000 -G appuser appuser
+# Install runtime dependencies only
+RUN apk --no-cache add \
+    ca-certificates \
+    tzdata
+
+# Create non-root user
+RUN addgroup -g 1000 cnap && \
+    adduser -D -u 1000 -G cnap cnap
 
 # Set working directory
 WORKDIR /app
 
 # Copy binary from builder
 COPY --from=builder /build/cnap .
-COPY --from=builder /build/configs ./configs
 
-# Change ownership
-RUN chown -R appuser:appuser /app
+# Copy configs if they exist
+COPY --from=builder /build/configs ./configs 2>/dev/null || true
+
+# Create data directory for SQLite
+RUN mkdir -p /app/data && \
+    chown -R cnap:cnap /app
 
 # Switch to non-root user
-USER appuser
-
-# Expose port if needed (adjust as necessary)
-# EXPOSE 8080
+USER cnap
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/app/cnap", "--health-check"] || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["/app/cnap", "health"]
 
 # Run the application
 ENTRYPOINT ["/app/cnap"]
+CMD ["start"]
