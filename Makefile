@@ -1,4 +1,4 @@
-.PHONY: build clean test fmt lint deps run help
+.PHONY: build clean test fmt lint deps run help run-local test-local dev clean-db
 
 # Binary name
 BINARY_NAME=cnap
@@ -9,6 +9,10 @@ GO=go
 VERSION?=$(shell git describe --tags --always --dirty)
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
+
+# Local development variables
+SQLITE_DB_DIR=./data
+SQLITE_DB_FILE=$(SQLITE_DB_DIR)/cnap.db
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -73,3 +77,24 @@ vendor: ## Create vendor directory
 	$(GO) mod vendor
 
 check: fmt lint test ## Run format, lint, and test
+
+# Local development commands (SQLite, no Docker required)
+
+run-local: ## Run with SQLite (no Docker needed)
+	@echo "Running $(BINARY_NAME) with SQLite..."
+	@mkdir -p $(SQLITE_DB_DIR)
+	@unset DATABASE_URL && $(GO) run $(LDFLAGS) ./cmd/cnap start
+
+dev: build ## Build and run locally with SQLite
+	@echo "Running $(BINARY_NAME) locally with SQLite..."
+	@mkdir -p $(SQLITE_DB_DIR)
+	@unset DATABASE_URL && ./$(BUILD_DIR)/$(BINARY_NAME) start
+
+test-local: ## Run tests with in-memory SQLite
+	@echo "Running tests with in-memory SQLite..."
+	@SQLITE_DATABASE=":memory:" $(GO) test -v -race -coverprofile=coverage.out ./...
+
+clean-db: ## Remove local SQLite database
+	@echo "Removing local SQLite database..."
+	@rm -f $(SQLITE_DB_FILE)
+	@echo "Database removed: $(SQLITE_DB_FILE)"
