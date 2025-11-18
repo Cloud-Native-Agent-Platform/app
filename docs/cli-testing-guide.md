@@ -30,12 +30,12 @@ docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml ps
 
 # 로그 확인
-docker logs cnap-unified -f
+docker logs cnap-app -f
 ```
 
 **환경 변수 확인:**
 ```bash
-docker exec cnap-unified env | grep DATABASE_URL
+docker exec cnap-app env | grep DATABASE_URL
 ```
 
 ### 방법 2: 로컬 PostgreSQL 사용
@@ -304,7 +304,7 @@ done
 
 ```bash
 # 컨테이너 내부로 진입
-docker exec -it cnap-unified /bin/bash
+docker exec -it cnap-app /bin/bash
 
 # 내부에서 CLI 사용
 cd /app
@@ -319,11 +319,11 @@ exit
 
 ```bash
 # Agent 목록 조회
-docker exec cnap-unified /app/bin/cnap agent list
+docker exec cnap-app /app/bin/cnap agent list
 
 # Agent 생성 (대화형은 불가능)
 # 스크립트로 입력 전달
-docker exec -i cnap-unified /app/bin/cnap agent create << EOF
+docker exec -i cnap-app /app/bin/cnap agent create << EOF
 docker-bot
 Docker 테스트 봇
 gpt-4
@@ -331,23 +331,23 @@ Docker 환경에서 실행되는 봇
 EOF
 
 # Task 생성
-docker exec cnap-unified /app/bin/cnap task create docker-bot docker-task-001
+docker exec cnap-app /app/bin/cnap task create docker-bot docker-task-001
 
 # Task 목록
-docker exec cnap-unified /app/bin/cnap task list docker-bot
+docker exec cnap-app /app/bin/cnap task list docker-bot
 ```
 
 ### Docker 로그 모니터링
 
 ```bash
 # 실시간 로그 확인
-docker logs cnap-unified -f
+docker logs cnap-app -f
 
 # 최근 100줄만 확인
-docker logs cnap-unified --tail 100
+docker logs cnap-app --tail 100
 
 # 타임스탬프 포함
-docker logs cnap-unified -f -t
+docker logs cnap-app -f -t
 ```
 
 ---
@@ -360,7 +360,7 @@ CLI가 올바르게 데이터를 저장하는지 데이터베이스에서 직접
 
 **Docker 환경:**
 ```bash
-docker exec -it cnap-unified psql -U cnap -d cnap
+docker exec -it cnap-app psql -U cnap -d cnap
 ```
 
 **로컬 환경:**
@@ -687,13 +687,13 @@ export LOG_LEVEL=debug
 
 ```bash
 # 실시간 로그
-docker logs cnap-unified -f
+docker logs cnap-app -f
 
 # 최근 로그만
-docker logs cnap-unified --tail 50
+docker logs cnap-app --tail 50
 
 # 특정 시간 이후 로그
-docker logs cnap-unified --since 10m
+docker logs cnap-app --since 10m
 ```
 
 ---
