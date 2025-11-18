@@ -39,11 +39,14 @@ func TestControllerCreateAndGetAgent(t *testing.T) {
 
 	ctx := context.Background()
 
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-x"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-x", "Test agent", "gpt-4", "Test prompt"))
 
 	info, err := ctrl.GetAgentInfo(ctx, "agent-x")
 	require.NoError(t, err)
 	require.Equal(t, "agent-x", info.Name)
+	require.Equal(t, "Test agent", info.Description)
+	require.Equal(t, "gpt-4", info.Model)
+	require.Equal(t, "Test prompt", info.Prompt)
 	require.Equal(t, storage.AgentStatusActive, info.Status)
 }
 
@@ -52,8 +55,8 @@ func TestControllerListAgents(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-a"))
-	require.NoError(t, ctrl.CreateAgent(ctx, "agent-b"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-a", "Agent A", "gpt-4", "Prompt A"))
+	require.NoError(t, ctrl.CreateAgent(ctx, "agent-b", "Agent B", "gpt-3", "Prompt B"))
 
 	agents, err := ctrl.ListAgents(ctx)
 	require.NoError(t, err)
