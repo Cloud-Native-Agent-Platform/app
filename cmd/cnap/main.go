@@ -11,7 +11,6 @@ import (
 
 	"github.com/cnap-oss/app/internal/connector"
 	"github.com/cnap-oss/app/internal/controller"
-	"github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -59,45 +58,11 @@ func main() {
 		},
 	}
 
-	// agent 명령어 그룹
-	agentCmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Agent operations",
-		Long:  `Commands for managing and running agents.`,
-	}
-
-	// agent run 명령어
-	agentRunCmd := &cobra.Command{
-		Use:   "run <agent> <name> <prompt>",
-		Short: "Run an agent",
-		Long:  `Run a specified agent with given name and prompt`,
-		Args:  cobra.ExactArgs(3),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			agent := args[0]
-			name := args[1]
-			prompt := args[2]
-			return runAgent(logger, agent, name, prompt)
-		},
-	}
-
-	// agent create 명령어
-	agentCreateCmd := &cobra.Command{
-		Use:   "create <agent>",
-		Short: "Agent",
-		Long:  `Create a new agent`,
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			agent := args[0]
-			return createAgent(logger, agent)
-		},
-	}
-
 	// 명령어 구성
-	agentCmd.AddCommand(agentRunCmd)
-	agentCmd.AddCommand(agentCreateCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(healthCmd)
-	rootCmd.AddCommand(agentCmd)
+	rootCmd.AddCommand(buildAgentCommands(logger))
+	rootCmd.AddCommand(buildTaskCommands(logger))
 
 	if err := rootCmd.Execute(); err != nil {
 		logger.Error("Command execution failed", zap.Error(err))
@@ -215,71 +180,6 @@ func runStart(logger *zap.Logger) error {
 	}
 
 	logger.Info("Servers stopped gracefully")
-	return nil
-}
-
-// runAgent는 에이전트를 실행합니다.
-func runAgent(logger *zap.Logger, agent, name, prompt string) error {
-	logger.Info("Running agent",
-		zap.String("agent", agent),
-		zap.String("name", name),
-		zap.String("prompt", prompt),
-	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	r := runner.NewRunner(logger.Named("runner"))
-
-	result, err := r.RunWithResult(ctx, agent, name, prompt)
-	if err != nil {
-		logger.Error("Failed to run agent", zap.Error(err))
-		return err
-	}
-
-	if result.Success {
-		fmt.Printf("✓ Agent executed successfully\n")
-		fmt.Printf("Output: %s\n", result.Output)
-	} else {
-		fmt.Printf("✗ Agent execution failed\n")
-		if result.Error != nil {
-			fmt.Printf("Error: %s\n", result.Error.Error())
-		}
-		return fmt.Errorf("agent execution failed")
-	}
-
-	return nil
-}
-
-// createAgent는 새로운 에이전트를 생성합니다.
-func createAgent(logger *zap.Logger, agent string) error {
-	logger.Info("Creating agent",
-		zap.String("agent", agent),
-	)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
-
-	ctrl, cleanup, err := newController(logger)
-	if err != nil {
-		logger.Error("Failed to initialize controller", zap.Error(err))
-		return err
-	}
-	defer cleanup()
-
-	// 에이전트 이름 검증
-	if err := ctrl.ValidateAgent(agent); err != nil {
-		logger.Error("Invalid agent name", zap.Error(err))
-		return err
-	}
-
-	// 에이전트 생성
-	if err := ctrl.CreateAgent(ctx, agent); err != nil {
-		logger.Error("Failed to create agent", zap.Error(err))
-		return err
-	}
-
-	fmt.Printf("✓ Agent '%s' created successfully\n", agent)
 	return nil
 }
 

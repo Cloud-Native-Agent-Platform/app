@@ -78,6 +78,25 @@ func (r *Repository) ListAgents(ctx context.Context, statuses ...string) ([]Agen
 	return agents, nil
 }
 
+// UpdateAgent는 에이전트 정보를 업데이트합니다.
+func (r *Repository) UpdateAgent(ctx context.Context, agent *Agent) error {
+	if agent == nil {
+		return fmt.Errorf("storage: nil agent payload")
+	}
+	if agent.AgentID == "" {
+		return fmt.Errorf("storage: empty agentID")
+	}
+	return r.db.WithContext(ctx).
+		Model(&Agent{}).
+		Where("agent_id = ?", agent.AgentID).
+		Updates(map[string]interface{}{
+			"description": agent.Description,
+			"model":       agent.Model,
+			"prompt":      agent.Prompt,
+			"updated_at":  time.Now(),
+		}).Error
+}
+
 // CreateTask는 새로운 작업 레코드를 추가합니다.
 func (r *Repository) CreateTask(ctx context.Context, task *Task) error {
 	if task == nil {

@@ -4,11 +4,14 @@ import "time"
 
 // Agent는 agents 테이블 레코드를 나타냅니다.
 type Agent struct {
-	ID        int64     `gorm:"column:id;type:bigserial;primaryKey"`
-	AgentID   string    `gorm:"column:agent_id;type:varchar(64);not null;uniqueIndex:idx_agents_agent_id"`
-	Status    string    `gorm:"column:status;type:varchar(32);not null;default:'active'"`
-	CreatedAt time.Time `gorm:"column:created_at;not null;autoCreateTime"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
+	ID          int64     `gorm:"column:id;type:bigserial;primaryKey"`
+	AgentID     string    `gorm:"column:agent_id;type:varchar(64);not null;uniqueIndex:idx_agents_agent_id"`
+	Description string    `gorm:"column:description;type:text"`
+	Model       string    `gorm:"column:model;type:varchar(64)"`
+	Prompt      string    `gorm:"column:prompt;type:text"`
+	Status      string    `gorm:"column:status;type:varchar(32);not null;default:'active'"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;autoCreateTime"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 
 // TableName은 gorm Tabler 인터페이스를 구현합니다.
