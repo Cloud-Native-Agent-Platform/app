@@ -11,7 +11,29 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
+	"golang.org/x/text/unicode/norm"
 )
+
+// normalizeInput은 입력 문자열을 유니코드 NFC(Normalization Form Canonical Composition)로 정규화합니다.
+// 이는 조합 중인 한글 문자를 완성된 음절로 변환하여 PostgreSQL에서 올바르게 처리되도록 합니다.
+// 또한 단독 자음/모음(U+1100-U+11FF, U+3131-U+318E)을 제거합니다.
+func normalizeInput(s string) string {
+	// NFC 정규화 적용
+	normalized := norm.NFC.String(s)
+
+	// 한글 자음/모음 범위 필터링
+	var filtered []rune
+	for _, r := range normalized {
+		// 한글 자음/모음 영역: U+1100-U+11FF (한글 자모), U+3131-U+318E (호환 자모)
+		if (r >= 0x1100 && r <= 0x11FF) || (r >= 0x3131 && r <= 0x318E) {
+			// 단독 자음/모음은 건너뛰기
+			continue
+		}
+		filtered = append(filtered, r)
+	}
+
+	return string(filtered)
+}
 
 func buildAgentCommands(logger *zap.Logger) *cobra.Command {
 	agentCmd := &cobra.Command{
@@ -97,19 +119,19 @@ func runAgentCreate(logger *zap.Logger) error {
 	// 대화형 입력
 	fmt.Print("Agent 이름: ")
 	name, _ := reader.ReadString('\n')
-	name = strings.TrimSpace(name)
+	name = normalizeInput(strings.TrimSpace(name))
 
 	fmt.Print("설명: ")
 	description, _ := reader.ReadString('\n')
-	description = strings.TrimSpace(description)
+	description = normalizeInput(strings.TrimSpace(description))
 
 	fmt.Print("모델 (예: gpt-4): ")
 	model, _ := reader.ReadString('\n')
-	model = strings.TrimSpace(model)
+	model = normalizeInput(strings.TrimSpace(model))
 
 	fmt.Print("프롬프트 (역할 정의): ")
 	prompt, _ := reader.ReadString('\n')
-	prompt = strings.TrimSpace(prompt)
+	prompt = normalizeInput(strings.TrimSpace(prompt))
 
 	// 입력 검증
 	if err := ctrl.ValidateAgent(name); err != nil {
@@ -246,21 +268,21 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 	// 현재 정보 표시 및 새 값 입력
 	fmt.Printf("설명 (현재: %s): ", agent.Description)
 	description, _ := reader.ReadString('\n')
-	description = strings.TrimSpace(description)
+	description = normalizeInput(strings.TrimSpace(description))
 	if description == "" {
 		description = agent.Description
 	}
 
 	fmt.Printf("모델 (현재: %s): ", agent.Model)
 	model, _ := reader.ReadString('\n')
-	model = strings.TrimSpace(model)
+	model = normalizeInput(strings.TrimSpace(model))
 	if model == "" {
 		model = agent.Model
 	}
 
 	fmt.Printf("프롬프트 (현재: %s): ", agent.Prompt)
 	prompt, _ := reader.ReadString('\n')
-	prompt = strings.TrimSpace(prompt)
+	prompt = normalizeInput(strings.TrimSpace(prompt))
 	if prompt == "" {
 		prompt = agent.Prompt
 	}

@@ -248,10 +248,10 @@ Docker 컨테이너 내에서 CLI를 사용할 수 있습니다.
 docker compose -f docker/docker-compose.yml up -d
 
 # 컨테이너 내부에서 CLI 사용
-docker exec -it cnap-unified /app/bin/cnap agent list
+docker exec cnap-app /app/bin/cnap agent list
 
-# 대화형 명령어 실행
-docker exec -it cnap-unified /app/bin/cnap agent create
+# 로그 확인
+docker logs cnap-app -f
 ```
 
 **참고:** Docker 환경에서는 환경 변수가 `docker-compose.yml`에 정의되어 있습니다.
