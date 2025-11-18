@@ -20,8 +20,8 @@ CNAP Controller CLI의 작동을 확인하고 테스트하는 방법을 안내�
 Docker Compose를 사용하면 PostgreSQL과 애플리케이션이 함께 실행됩니다.
 
 ```bash
-# 프로젝트 루트에서
-cd /Users/leo/Documents/development/app
+# 프로젝트 루트로 이동
+cd /path/to/project
 
 # Docker Compose 실행
 docker compose -f docker/docker-compose.yml up -d

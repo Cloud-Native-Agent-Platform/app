@@ -16,23 +16,10 @@ import (
 
 // normalizeInput은 입력 문자열을 유니코드 NFC(Normalization Form Canonical Composition)로 정규화합니다.
 // 이는 조합 중인 한글 문자를 완성된 음절로 변환하여 PostgreSQL에서 올바르게 처리되도록 합니다.
-// 또한 단독 자음/모음(U+1100-U+11FF, U+3131-U+318E)을 제거합니다.
+// NFC 정규화는 조합 문자를 완성된 한글 음절(U+AC00-U+D7A3)로 자동 변환하므로
+// 단독 자음/모음 제거를 위한 별도 필터링은 필요하지 않습니다.
 func normalizeInput(s string) string {
-	// NFC 정규화 적용
-	normalized := norm.NFC.String(s)
-
-	// 한글 자음/모음 범위 필터링
-	var filtered []rune
-	for _, r := range normalized {
-		// 한글 자음/모음 영역: U+1100-U+11FF (한글 자모), U+3131-U+318E (호환 자모)
-		if (r >= 0x1100 && r <= 0x11FF) || (r >= 0x3131 && r <= 0x318E) {
-			// 단독 자음/모음은 건너뛰기
-			continue
-		}
-		filtered = append(filtered, r)
-	}
-
-	return string(filtered)
+	return norm.NFC.String(s)
 }
 
 func buildAgentCommands(logger *zap.Logger) *cobra.Command {
@@ -118,19 +105,31 @@ func runAgentCreate(logger *zap.Logger) error {
 
 	// 대화형 입력
 	fmt.Print("Agent 이름: ")
-	name, _ := reader.ReadString('\n')
+	name, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("Agent 이름 입력 중 오류 발생: %w", err)
+	}
 	name = normalizeInput(strings.TrimSpace(name))
 
 	fmt.Print("설명: ")
-	description, _ := reader.ReadString('\n')
+	description, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("설명 입력 중 오류 발생: %w", err)
+	}
 	description = normalizeInput(strings.TrimSpace(description))
 
 	fmt.Print("모델 (예: gpt-4): ")
-	model, _ := reader.ReadString('\n')
+	model, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("모델 입력 중 오류 발생: %w", err)
+	}
 	model = normalizeInput(strings.TrimSpace(model))
 
 	fmt.Print("프롬프트 (역할 정의): ")
-	prompt, _ := reader.ReadString('\n')
+	prompt, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("프롬프트 입력 중 오류 발생: %w", err)
+	}
 	prompt = normalizeInput(strings.TrimSpace(prompt))
 
 	// 입력 검증
@@ -174,8 +173,9 @@ func runAgentList(logger *zap.Logger) error {
 
 	for _, agent := range agents {
 		desc := agent.Description
-		if len(desc) > 40 {
-			desc = desc[:37] + "..."
+		runes := []rune(desc)
+		if len(runes) > 40 {
+			desc = string(runes[:37]) + "..."
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			agent.Name,

@@ -93,7 +93,6 @@ func (r *Repository) UpdateAgent(ctx context.Context, agent *Agent) error {
 			"description": agent.Description,
 			"model":       agent.Model,
 			"prompt":      agent.Prompt,
-			"updated_at":  time.Now(),
 		}).Error
 }
 
