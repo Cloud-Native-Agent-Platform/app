@@ -94,7 +94,7 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID string) error {
 	defer cleanup()
 
 	if err := ctrl.CreateTask(ctx, agentName, taskID); err != nil {
-		return fmt.Errorf("Task 생성 실패: %w", err)
+		return fmt.Errorf("task 생성 실패: %w", err)
 	}
 
 	fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
@@ -113,7 +113,7 @@ func runTaskList(logger *zap.Logger, agentName string) error {
 
 	tasks, err := ctrl.ListTasksByAgent(ctx, agentName)
 	if err != nil {
-		return fmt.Errorf("Task 목록 조회 실패: %w", err)
+		return fmt.Errorf("task 목록 조회 실패: %w", err)
 	}
 
 	if len(tasks) == 0 {
@@ -123,18 +123,18 @@ func runTaskList(logger *zap.Logger, agentName string) error {
 
 	// 테이블 형식 출력
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "TASK ID\tSTATUS\tCREATED\tUPDATED")
-	fmt.Fprintln(w, "-------\t------\t-------\t-------")
+	_, _ = fmt.Fprintln(w, "TASK ID\tSTATUS\tCREATED\tUPDATED")
+	_, _ = fmt.Fprintln(w, "-------\t------\t-------\t-------")
 
 	for _, task := range tasks {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
 			task.TaskID,
 			task.Status,
 			task.CreatedAt.Format("2006-01-02 15:04"),
 			task.UpdatedAt.Format("2006-01-02 15:04"),
 		)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
@@ -151,7 +151,7 @@ func runTaskView(logger *zap.Logger, taskID string) error {
 
 	task, err := ctrl.GetTaskInfo(ctx, taskID)
 	if err != nil {
-		return fmt.Errorf("Task 조회 실패: %w", err)
+		return fmt.Errorf("task 조회 실패: %w", err)
 	}
 
 	// 상세 정보 출력
@@ -197,7 +197,7 @@ func runTaskUpdateStatus(logger *zap.Logger, taskID, status string) error {
 	}
 
 	if err := ctrl.UpdateTaskStatus(ctx, taskID, status); err != nil {
-		return fmt.Errorf("Task 상태 변경 실패: %w", err)
+		return fmt.Errorf("task 상태 변경 실패: %w", err)
 	}
 
 	fmt.Printf("✓ Task '%s' 상태 변경: %s\n", taskID, status)
