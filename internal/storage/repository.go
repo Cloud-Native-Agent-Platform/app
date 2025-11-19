@@ -145,20 +145,58 @@ func (r *Repository) ListTasksByAgent(ctx context.Context, agentID string) ([]Ta
 	return tasks, nil
 }
 
-// UpsertMessageIndex는 대화 인덱스별 메시지 파일 경로를 생성하거나 갱신합니다.
-func (r *Repository) UpsertMessageIndex(ctx context.Context, payload *MessageIndex) error {
-	if payload == nil {
-		return fmt.Errorf("storage: nil message index payload")
+// GetNextConversationIndex는 해당 Task의 다음 ConversationIndex를 반환합니다.
+func (r *Repository) GetNextConversationIndex(ctx context.Context, taskID string) (int, error) {
+	if taskID == "" {
+		return 0, fmt.Errorf("storage: empty taskID")
 	}
-	if payload.UpdatedAt.IsZero() {
-		payload.UpdatedAt = time.Now().UTC()
+	var maxIndex struct {
+		MaxIndex *int
 	}
-	return r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "task_id"}, {Name: "conversation_index"}},
-			DoUpdates: clause.AssignmentColumns([]string{"file_path", "updated_at"}),
-		}).
-		Create(payload).Error
+	if err := r.db.WithContext(ctx).
+		Model(&MessageIndex{}).
+		Select("MAX(conversation_index) as max_index").
+		Where("task_id = ?", taskID).
+		Scan(&maxIndex).Error; err != nil {
+		return 0, err
+	}
+	if maxIndex.MaxIndex == nil {
+		return 0, nil
+	}
+	return *maxIndex.MaxIndex + 1, nil
+}
+
+// AppendMessageIndex는 새로운 메시지를 대화에 추가합니다 (ConversationIndex 자동 증가).
+func (r *Repository) AppendMessageIndex(ctx context.Context, taskID, role, filePath string) (*MessageIndex, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("storage: empty taskID")
+	}
+	if role == "" {
+		return nil, fmt.Errorf("storage: empty role")
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("storage: empty filePath")
+	}
+
+	nextIndex, err := r.GetNextConversationIndex(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("storage: failed to get next conversation index: %w", err)
+	}
+
+	payload := &MessageIndex{
+		TaskID:            taskID,
+		ConversationIndex: nextIndex,
+		Role:              role,
+		FilePath:          filePath,
+		CreatedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
+	}
+
+	if err := r.db.WithContext(ctx).Create(payload).Error; err != nil {
+		return nil, err
+	}
+
+	return payload, nil
 }
 
 // ListMessageIndexByTask는 작업에 연결된 메시지 참조 목록을 순서대로 반환합니다.

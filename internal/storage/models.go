@@ -39,7 +39,9 @@ type MessageIndex struct {
 	ID                int64     `gorm:"column:id;type:bigserial;primaryKey"`
 	TaskID            string    `gorm:"column:task_id;type:varchar(64);not null;index:idx_msg_index_task;uniqueIndex:idx_msg_idx_task_conv,priority:1"`
 	ConversationIndex int       `gorm:"column:conversation_index;type:int;not null;uniqueIndex:idx_msg_idx_task_conv,priority:2"`
+	Role              string    `gorm:"column:role;type:varchar(32);not null"`
 	FilePath          string    `gorm:"column:file_path;type:text;not null"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null;autoCreateTime"`
 	UpdatedAt         time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
 }
 

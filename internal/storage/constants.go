@@ -21,4 +21,8 @@ const (
 	RunStepTypeTool       = "tool"
 	RunStepTypeModel      = "model"
 	RunStepTypeCheckpoint = "checkpoint"
+
+	MessageRoleUser      = "user"
+	MessageRoleAssistant = "assistant"
+	MessageRoleSystem    = "system"
 )

@@ -5,6 +5,7 @@ CNAP Controller CLI의 작동을 확인하고 테스트하는 방법을 안내�
 ## 목차
 - [환경 설정](#환경-설정)
 - [기본 테스트](#기본-테스트)
+- [메시지 관리 테스트](#메시지-관리-테스트)
 - [전체 워크플로우 테스트](#전체-워크플로우-테스트)
 - [Docker 환경 테스트](#docker-환경-테스트)
 - [데이터베이스 검증](#데이터베이스-검증)
@@ -235,6 +236,169 @@ echo "y" | ./bin/cnap agent delete test-bot
 
 ---
 
+## 메시지 관리 테스트
+
+MessageIndex는 Task의 대화 메시지를 추적하는 기능입니다. 메시지의 역할(user/assistant/system), 순서, 파일 경로를 DB에 저장하여 빠른 검색과 대화 흐름 파악을 가능하게 합니다.
+
+### 주요 개념
+
+- **ConversationIndex**: Task별 메시지 순서 번호 (0부터 자동 증가)
+- **Role**: 메시지 발신자 구분 (`user`, `assistant`, `system`)
+- **FilePath**: 실제 메시지 내용이 저장된 JSON 파일 경로
+
+### 1. 메시지 추가 (프로그래밍 방식)
+
+현재 CLI에서는 MessageIndex 직접 관리 기능이 없으므로, Go 코드나 데이터베이스를 통해 테스트합니다.
+
+**Go 코드 예시:**
+```go
+// Agent와 Task가 이미 생성되어 있다고 가정
+msg, err := repo.AppendMessageIndex(ctx, "task-001", storage.MessageRoleUser, "/data/msg-000.json")
+// msg.ConversationIndex는 자동으로 0, 1, 2... 증가
+```
+
+### 2. 데이터베이스에서 직접 메시지 추가
+
+**PostgreSQL 접속:**
+```bash
+# Docker 환경
+docker exec -it cnap-app psql -U cnap -d cnap
+
+# 로컬 환경
+psql -U cnap -d cnap
+```
+
+**메시지 추가 예시:**
+```sql
+-- Task 'task-001'에 user 메시지 추가
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 0, 'user', '/data/task-001/msg-000.json', NOW(), NOW());
+
+-- assistant 응답 추가
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 1, 'assistant', '/data/task-001/msg-001.json', NOW(), NOW());
+
+-- 추가 user 메시지
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 2, 'user', '/data/task-001/msg-002.json', NOW(), NOW());
+```
+
+### 3. 메시지 조회 및 검증
+
+**특정 Task의 모든 메시지 조회 (순서대로):**
+```sql
+SELECT conversation_index, role, file_path, created_at
+FROM msg_index
+WHERE task_id = 'task-001'
+ORDER BY conversation_index ASC;
+```
+
+**예상 출력:**
+```
+ conversation_index |   role    |          file_path          |      created_at
+--------------------+-----------+-----------------------------+---------------------
+                  0 | user      | /data/task-001/msg-000.json | 2025-11-19 10:00:00
+                  1 | assistant | /data/task-001/msg-001.json | 2025-11-19 10:00:05
+                  2 | user      | /data/task-001/msg-002.json | 2025-11-19 10:00:10
+```
+
+**Role별 메시지 개수 확인:**
+```sql
+SELECT role, COUNT(*) as message_count
+FROM msg_index
+WHERE task_id = 'task-001'
+GROUP BY role;
+```
+
+**예상 출력:**
+```
+   role    | message_count
+-----------+--------------
+ user      |             2
+ assistant |             1
+```
+
+### 4. ConversationIndex 자동 증가 검증
+
+**다음 인덱스 확인 쿼리:**
+```sql
+SELECT COALESCE(MAX(conversation_index), -1) + 1 as next_index
+FROM msg_index
+WHERE task_id = 'task-001';
+```
+
+이 쿼리는 `GetNextConversationIndex()` 메서드가 내부적으로 사용하는 로직과 동일합니다.
+
+### 5. 메시지 순서 연속성 검증
+
+**누락된 인덱스가 있는지 확인:**
+```sql
+WITH RECURSIVE expected_indices AS (
+  SELECT 0 AS idx
+  UNION ALL
+  SELECT idx + 1
+  FROM expected_indices
+  WHERE idx < (SELECT MAX(conversation_index) FROM msg_index WHERE task_id = 'task-001')
+)
+SELECT ei.idx as missing_index
+FROM expected_indices ei
+LEFT JOIN msg_index mi ON ei.idx = mi.conversation_index AND mi.task_id = 'task-001'
+WHERE mi.id IS NULL;
+```
+
+결과가 비어 있으면 순서가 올바릅니다.
+
+### 6. 테스트 시나리오
+
+**완전한 대화 흐름 테스트:**
+```sql
+-- 1. Agent와 Task 생성 (CLI 사용)
+-- ./bin/cnap agent create
+-- ./bin/cnap task create test-bot task-chat-001
+
+-- 2. 대화 시뮬레이션
+BEGIN;
+
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES
+  ('task-chat-001', 0, 'user', '/data/task-chat-001/msg-000.json', NOW(), NOW()),
+  ('task-chat-001', 1, 'assistant', '/data/task-chat-001/msg-001.json', NOW(), NOW()),
+  ('task-chat-001', 2, 'user', '/data/task-chat-001/msg-002.json', NOW(), NOW()),
+  ('task-chat-001', 3, 'assistant', '/data/task-chat-001/msg-003.json', NOW(), NOW());
+
+-- 3. 검증
+SELECT
+  conversation_index,
+  role,
+  file_path,
+  created_at
+FROM msg_index
+WHERE task_id = 'task-chat-001'
+ORDER BY conversation_index;
+
+COMMIT;
+```
+
+### 7. Repository 메서드 테스트 (Go)
+
+**단위 테스트 실행:**
+```bash
+# MessageIndex 관련 테스트만 실행
+go test ./internal/storage/... -v -run TestRepositoryMessageIndexAutoIncrement
+
+# 전체 storage 테스트
+go test ./internal/storage/... -v
+```
+
+**예상 출력:**
+```
+=== RUN   TestRepositoryMessageIndexAutoIncrement
+--- PASS: TestRepositoryMessageIndexAutoIncrement (0.00s)
+PASS
+```
+
+---
+
 ## 전체 워크플로우 테스트
 
 ### 시나리오: 챗봇 생성부터 Task 관리까지
@@ -400,9 +564,44 @@ FROM tasks
 WHERE agent_id = 'test-bot'
 ORDER BY created_at DESC;
 
+-- 모든 MessageIndex 조회
+SELECT task_id, conversation_index, role, file_path, created_at
+FROM msg_index
+ORDER BY task_id, conversation_index;
+
+-- 특정 Task의 메시지 조회 (대화 순서대로)
+SELECT conversation_index, role, file_path, created_at
+FROM msg_index
+WHERE task_id = 'task-001'
+ORDER BY conversation_index ASC;
+
+-- Task별 메시지 통계
+SELECT
+    task_id,
+    COUNT(*) as total_messages,
+    COUNT(CASE WHEN role = 'user' THEN 1 END) as user_messages,
+    COUNT(CASE WHEN role = 'assistant' THEN 1 END) as assistant_messages,
+    COUNT(CASE WHEN role = 'system' THEN 1 END) as system_messages,
+    MAX(conversation_index) as last_index
+FROM msg_index
+GROUP BY task_id;
+
+-- Task와 MessageIndex 조인 조회
+SELECT
+    t.task_id,
+    t.agent_id,
+    t.status as task_status,
+    COUNT(m.id) as message_count,
+    MAX(m.conversation_index) as last_message_index,
+    MAX(m.created_at) as last_message_time
+FROM tasks t
+LEFT JOIN msg_index m ON t.task_id = m.task_id
+GROUP BY t.task_id, t.agent_id, t.status;
+
 -- 테이블 구조 확인
 \d agents
 \d tasks
+\d msg_index
 
 -- 데이터베이스 종료
 \q
@@ -428,6 +627,48 @@ SELECT task_id, COUNT(*)
 FROM tasks
 GROUP BY task_id
 HAVING COUNT(*) > 1;
+
+-- Task 없이 존재하는 MessageIndex 확인 (있으면 안 됨)
+SELECT m.task_id, COUNT(*) as orphaned_messages
+FROM msg_index m
+LEFT JOIN tasks t ON m.task_id = t.task_id
+WHERE t.id IS NULL
+GROUP BY m.task_id;
+
+-- 중복된 MessageIndex 확인 (task_id + conversation_index는 unique해야 함)
+SELECT task_id, conversation_index, COUNT(*)
+FROM msg_index
+GROUP BY task_id, conversation_index
+HAVING COUNT(*) > 1;
+
+-- 잘못된 Role 값 확인 (user, assistant, system만 허용)
+SELECT task_id, conversation_index, role
+FROM msg_index
+WHERE role NOT IN ('user', 'assistant', 'system');
+
+-- ConversationIndex 연속성 검증 (누락된 인덱스 확인)
+WITH task_max_indices AS (
+  SELECT task_id, MAX(conversation_index) as max_idx
+  FROM msg_index
+  GROUP BY task_id
+),
+expected_counts AS (
+  SELECT task_id, max_idx + 1 as expected_count
+  FROM task_max_indices
+),
+actual_counts AS (
+  SELECT task_id, COUNT(*) as actual_count
+  FROM msg_index
+  GROUP BY task_id
+)
+SELECT
+  e.task_id,
+  e.expected_count,
+  a.actual_count,
+  e.expected_count - a.actual_count as missing_indices
+FROM expected_counts e
+JOIN actual_counts a ON e.task_id = a.task_id
+WHERE e.expected_count != a.actual_count;
 ```
 
 ---
@@ -500,6 +741,57 @@ echo -e "test-bot\n테스트\ngpt-4\n프롬프트" | ./bin/cnap agent create
 echo -e "test-bot\n테스트2\ngpt-4\n프롬프트2" | ./bin/cnap agent create
 ```
 **예상 출력:** 두 번째 생성 시 중복 에러
+
+### 5. MessageIndex 에러 케이스
+
+**잘못된 Role 값:**
+```sql
+-- 데이터베이스에 직접 접속
+docker exec -it cnap-app psql -U cnap -d cnap
+
+-- 잘못된 role 값으로 삽입 시도
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 0, 'invalid-role', '/data/msg.json', NOW(), NOW());
+```
+**예상 결과:** DB 제약조건은 없으나, 애플리케이션 레벨에서 검증 필요
+
+**중복된 ConversationIndex:**
+```sql
+-- 같은 task_id와 conversation_index로 두 번 삽입 시도
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 0, 'user', '/data/msg-000.json', NOW(), NOW());
+
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 0, 'assistant', '/data/msg-001.json', NOW(), NOW());
+```
+**예상 결과:** `ERROR: duplicate key value violates unique constraint "idx_msg_idx_task_conv"`
+
+**존재하지 않는 Task에 메시지 추가:**
+```sql
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('nonexistent-task', 0, 'user', '/data/msg.json', NOW(), NOW());
+```
+**예상 결과:** 성공 (외래 키 제약조건 없음, 애플리케이션 레벨에서 검증 필요)
+
+**빈 Role 값:**
+```sql
+INSERT INTO msg_index (task_id, conversation_index, role, file_path, created_at, updated_at)
+VALUES ('task-001', 0, '', '/data/msg.json', NOW(), NOW());
+```
+**예상 결과:** `ERROR: null value in column "role" violates not-null constraint`
+
+**Repository 메서드 에러 테스트 (Go):**
+```go
+// AppendMessageIndex에 빈 값 전달
+_, err := repo.AppendMessageIndex(ctx, "", storage.MessageRoleUser, "/data/msg.json")
+// 예상: "storage: empty taskID" 에러
+
+_, err = repo.AppendMessageIndex(ctx, "task-001", "", "/data/msg.json")
+// 예상: "storage: empty role" 에러
+
+_, err = repo.AppendMessageIndex(ctx, "task-001", storage.MessageRoleUser, "")
+// 예상: "storage: empty filePath" 에러
+```
 
 ---
 
