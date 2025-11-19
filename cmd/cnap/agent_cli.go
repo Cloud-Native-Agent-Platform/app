@@ -140,7 +140,7 @@ func runAgentCreate(logger *zap.Logger) error {
 
 	// Agent 생성
 	if err := ctrl.CreateAgent(ctx, name, description, model, prompt); err != nil {
-		return fmt.Errorf("Agent 생성 실패: %w", err)
+		return fmt.Errorf("agent 생성 실패: %w", err)
 	}
 
 	fmt.Printf("✓ Agent '%s' 생성 완료\n", name)
@@ -159,7 +159,7 @@ func runAgentList(logger *zap.Logger) error {
 
 	agents, err := ctrl.ListAgentsWithInfo(ctx)
 	if err != nil {
-		return fmt.Errorf("Agent 목록 조회 실패: %w", err)
+		return fmt.Errorf("agent 목록 조회 실패: %w", err)
 	}
 
 	if len(agents) == 0 {
@@ -169,15 +169,15 @@ func runAgentList(logger *zap.Logger) error {
 
 	// 테이블 형식 출력
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAME\tSTATUS\tMODEL\tDESCRIPTION\tCREATED")
-	fmt.Fprintln(w, "----\t------\t-----\t-----------\t-------")
+	_, _ = fmt.Fprintln(w, "NAME\tSTATUS\tMODEL\tDESCRIPTION\tCREATED")
+	_, _ = fmt.Fprintln(w, "----\t------\t-----\t-----------\t-------")
 
 	for _, agent := range agents {
 		desc := agent.Description
 		if len(desc) > 40 {
 			desc = desc[:37] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			agent.Name,
 			agent.Status,
 			agent.Model,
@@ -185,7 +185,7 @@ func runAgentList(logger *zap.Logger) error {
 			agent.CreatedAt.Format("2006-01-02 15:04"),
 		)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	return nil
 }
@@ -202,7 +202,7 @@ func runAgentView(logger *zap.Logger, agentName string) error {
 
 	agent, err := ctrl.GetAgentInfo(ctx, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent 조회 실패: %w", err)
+		return fmt.Errorf("agent 조회 실패: %w", err)
 	}
 
 	// 상세 정보 출력
@@ -240,7 +240,7 @@ func runAgentDelete(logger *zap.Logger, agentName string) error {
 	}
 
 	if err := ctrl.DeleteAgent(ctx, agentName); err != nil {
-		return fmt.Errorf("Agent 삭제 실패: %w", err)
+		return fmt.Errorf("agent 삭제 실패: %w", err)
 	}
 
 	fmt.Printf("✓ Agent '%s' 삭제 완료\n", agentName)
@@ -260,7 +260,7 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 	// 기존 정보 조회
 	agent, err := ctrl.GetAgentInfo(ctx, agentName)
 	if err != nil {
-		return fmt.Errorf("Agent 조회 실패: %w", err)
+		return fmt.Errorf("agent 조회 실패: %w", err)
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -289,7 +289,7 @@ func runAgentEdit(logger *zap.Logger, agentName string) error {
 
 	// Agent 수정
 	if err := ctrl.UpdateAgent(ctx, agentName, description, model, prompt); err != nil {
-		return fmt.Errorf("Agent 수정 실패: %w", err)
+		return fmt.Errorf("agent 수정 실패: %w", err)
 	}
 
 	fmt.Printf("✓ Agent '%s' 수정 완료\n", agentName)
