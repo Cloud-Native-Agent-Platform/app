@@ -222,6 +222,8 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID string) err
 		c.logger.Error("Failed to create task", zap.Error(err))
 		return err
 	}
+	
+	// TODO: Create TaskRunner with RunnerManager
 
 	c.logger.Info("Task created successfully",
 		zap.String("task_id", taskID),
