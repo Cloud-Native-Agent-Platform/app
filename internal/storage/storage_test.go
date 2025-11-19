@@ -3,7 +3,6 @@ package storage_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/cnap-oss/app/internal/storage"
 	"github.com/stretchr/testify/require"
@@ -87,22 +86,79 @@ func TestRepositoryTaskAndMessages(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, storage.TaskStatusRunning, fetchedTask.Status)
 
-	// 메시지 인덱스 upsert
-	idxPayload := &storage.MessageIndex{
-		TaskID:            "task-1",
-		ConversationIndex: 1,
-		FilePath:          "/tmp/msg1.json",
-		UpdatedAt:         time.Now(),
-	}
-	require.NoError(t, repo.UpsertMessageIndex(ctx, idxPayload))
+	// 메시지 인덱스 추가
+	msg1, err := repo.AppendMessageIndex(ctx, "task-1", storage.MessageRoleUser, "/tmp/msg0.json")
+	require.NoError(t, err)
+	require.Equal(t, 0, msg1.ConversationIndex)
 
-	idxPayload.FilePath = "/tmp/msg1-updated.json"
-	require.NoError(t, repo.UpsertMessageIndex(ctx, idxPayload))
+	msg2, err := repo.AppendMessageIndex(ctx, "task-1", storage.MessageRoleAssistant, "/tmp/msg1.json")
+	require.NoError(t, err)
+	require.Equal(t, 1, msg2.ConversationIndex)
 
 	indexRows, err := repo.ListMessageIndexByTask(ctx, "task-1")
 	require.NoError(t, err)
-	require.Len(t, indexRows, 1)
-	require.Equal(t, "/tmp/msg1-updated.json", indexRows[0].FilePath)
+	require.Len(t, indexRows, 2)
+	require.Equal(t, "/tmp/msg0.json", indexRows[0].FilePath)
+	require.Equal(t, storage.MessageRoleUser, indexRows[0].Role)
+	require.Equal(t, "/tmp/msg1.json", indexRows[1].FilePath)
+	require.Equal(t, storage.MessageRoleAssistant, indexRows[1].Role)
+}
+
+func TestRepositoryMessageIndexAutoIncrement(t *testing.T) {
+	repo, cleanup := newTestRepository(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Agent와 Task 생성
+	require.NoError(t, repo.CreateAgent(ctx, &storage.Agent{
+		AgentID: "agent-1",
+		Status:  storage.AgentStatusActive,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &storage.Task{
+		TaskID:  "task-1",
+		AgentID: "agent-1",
+		Status:  storage.TaskStatusRunning,
+	}))
+
+	// 첫 번째 메시지: index는 0부터 시작
+	nextIndex, err := repo.GetNextConversationIndex(ctx, "task-1")
+	require.NoError(t, err)
+	require.Equal(t, 0, nextIndex)
+
+	// AppendMessageIndex로 메시지 추가
+	msg1, err := repo.AppendMessageIndex(ctx, "task-1", storage.MessageRoleUser, "/tmp/msg0.json")
+	require.NoError(t, err)
+	require.Equal(t, 0, msg1.ConversationIndex)
+	require.Equal(t, storage.MessageRoleUser, msg1.Role)
+	require.Equal(t, "/tmp/msg0.json", msg1.FilePath)
+
+	// 두 번째 메시지
+	msg2, err := repo.AppendMessageIndex(ctx, "task-1", storage.MessageRoleAssistant, "/tmp/msg1.json")
+	require.NoError(t, err)
+	require.Equal(t, 1, msg2.ConversationIndex)
+	require.Equal(t, storage.MessageRoleAssistant, msg2.Role)
+
+	// 세 번째 메시지
+	msg3, err := repo.AppendMessageIndex(ctx, "task-1", storage.MessageRoleUser, "/tmp/msg2.json")
+	require.NoError(t, err)
+	require.Equal(t, 2, msg3.ConversationIndex)
+
+	// 다음 인덱스 확인
+	nextIndex, err = repo.GetNextConversationIndex(ctx, "task-1")
+	require.NoError(t, err)
+	require.Equal(t, 3, nextIndex)
+
+	// 전체 메시지 목록 확인
+	messages, err := repo.ListMessageIndexByTask(ctx, "task-1")
+	require.NoError(t, err)
+	require.Len(t, messages, 3)
+	require.Equal(t, 0, messages[0].ConversationIndex)
+	require.Equal(t, storage.MessageRoleUser, messages[0].Role)
+	require.Equal(t, 1, messages[1].ConversationIndex)
+	require.Equal(t, storage.MessageRoleAssistant, messages[1].Role)
+	require.Equal(t, 2, messages[2].ConversationIndex)
+	require.Equal(t, storage.MessageRoleUser, messages[2].Role)
 }
 
 func TestRepositoryRunStepsAndCheckpoints(t *testing.T) {
