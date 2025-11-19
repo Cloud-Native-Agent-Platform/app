@@ -22,6 +22,109 @@ cnap-app/
 - **runc**: 최신 버전
 - **권한**: root
 
+## 개발 도구 설정
+
+### 필수 도구 설치
+
+#### 1. golangci-lint 설치
+
+`golangci-lint`는 여러 Go linter를 통합 실행하는 도구로, CI에서 코드 품질 검사에 사용됩니다.
+
+**macOS (Homebrew):**
+```bash
+brew install golangci-lint
+```
+
+**Linux:**
+```bash
+# Binary 직접 설치 (최신 버전)
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin
+
+# 또는 go install 사용
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
+**설치 확인:**
+```bash
+golangci-lint --version
+```
+
+#### 2. 기타 개발 도구
+
+**Make** (빌드 자동화):
+```bash
+# macOS
+brew install make
+
+# Linux (대부분 기본 설치됨)
+sudo apt-get install make  # Debian/Ubuntu
+sudo yum install make       # RHEL/CentOS
+```
+
+### 개발 워크플로우
+
+#### 코드 포매팅
+```bash
+# Go 표준 포매터 실행
+make fmt
+
+# 또는 직접 실행
+go fmt ./...
+gofmt -s -w .
+```
+
+#### Lint 검사
+```bash
+# golangci-lint 실행 (프로젝트 루트의 .golangci.toml 설정 사용)
+make lint
+
+# 또는 직접 실행
+golangci-lint run
+
+# 특정 디렉토리만 검사
+golangci-lint run ./internal/...
+
+# 자동 수정 가능한 이슈 수정
+golangci-lint run --fix
+```
+
+#### 전체 검사 실행
+```bash
+# 포매팅, Lint, 테스트를 한번에 실행
+make check
+```
+
+### CI 통과를 위한 체크리스트
+
+PR을 생성하기 전에 다음 명령어들이 모두 성공하는지 확인하세요:
+
+```bash
+# 1. 코드 포매팅
+make fmt
+
+# 2. Lint 검사
+make lint
+
+# 3. 테스트 실행
+make test
+
+# 또는 한번에 실행
+make check
+```
+
+### Makefile 주요 명령어
+
+| 명령어 | 설명 |
+| --- | --- |
+| `make build` | 바이너리 빌드 (`bin/cnap`) |
+| `make fmt` | 코드 포매팅 (`gofmt`, `goimports`) |
+| `make lint` | golangci-lint 실행 |
+| `make test` | 모든 테스트 실행 |
+| `make test-coverage` | 커버리지 리포트 생성 |
+| `make check` | fmt + lint + test 실행 |
+| `make clean` | 빌드 산출물 삭제 |
+| `make docker-build` | Docker 이미지 빌드 |
+
 ### 4. 빌드
 
 ```bash
