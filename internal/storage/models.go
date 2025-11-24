@@ -24,6 +24,7 @@ type Task struct {
 	ID        int64     `gorm:"column:id;type:bigserial;primaryKey"`
 	TaskID    string    `gorm:"column:task_id;type:varchar(64);not null;uniqueIndex:idx_tasks_task_id"`
 	AgentID   string    `gorm:"column:agent_id;type:varchar(64);not null;index:idx_tasks_agent_id"`
+	Prompt    string    `gorm:"column:prompt;type:text"`
 	Status    string    `gorm:"column:status;type:varchar(32);not null"`
 	CreatedAt time.Time `gorm:"column:created_at;not null;autoCreateTime"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null;autoUpdateTime"`
