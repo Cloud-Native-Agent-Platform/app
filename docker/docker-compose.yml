@@ -33,6 +33,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-cnap}:${POSTGRES_PASSWORD:-cnap}@postgres:5432/${POSTGRES_DB:-cnap}?sslmode=disable
       ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+    env_file:
+      - ../internal/connector/.env
     volumes:
       - app_data:/app/data
     networks:
