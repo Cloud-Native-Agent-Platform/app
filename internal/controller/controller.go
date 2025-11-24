@@ -563,8 +563,3 @@ func (c *Controller) saveMessageToFile(taskID, content string) string {
 	return fmt.Sprintf("data/messages/%s/%d.json", taskID, time.Now().UnixNano())
 }
 
-// loadMessageFromFile loads message content from a file.
-func (c *Controller) loadMessageFromFile(filePath string) (string, error) {
-	// TODO: 실제 파일 읽기 로직 구현
-	return "", fmt.Errorf("not implemented: loadMessageFromFile")
-}
