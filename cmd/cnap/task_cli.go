@@ -20,15 +20,17 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	}
 
 	// task create
+	var createPrompt string
 	taskCreateCmd := &cobra.Command{
 		Use:   "create <agent-name> <task-id>",
 		Short: "새로운 Task 생성",
-		Long:  "특정 Agent에 새로운 Task를 생성합니다.",
+		Long:  "특정 Agent에 새로운 Task를 생성합니다. --prompt 옵션으로 초기 프롬프트를 설정할 수 있습니다.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCreate(logger, args[0], args[1])
+			return runTaskCreate(logger, args[0], args[1], createPrompt)
 		},
 	}
+	taskCreateCmd.Flags().StringVarP(&createPrompt, "prompt", "p", "", "Task 초기 프롬프트")
 
 	// task list
 	taskListCmd := &cobra.Command{
@@ -74,16 +76,52 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 		},
 	}
 
+	// task send
+	taskSendCmd := &cobra.Command{
+		Use:   "send <task-id>",
+		Short: "Task 실행 트리거",
+		Long:  "Task의 메시지를 전송하고 실행을 트리거합니다.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskSend(logger, args[0])
+		},
+	}
+
+	// task add-message
+	taskAddMessageCmd := &cobra.Command{
+		Use:   "add-message <task-id> <message>",
+		Short: "Task에 메시지 추가",
+		Long:  "Task에 새로운 메시지를 추가합니다. 실행은 트리거하지 않습니다.",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskAddMessage(logger, args[0], args[1])
+		},
+	}
+
+	// task messages
+	taskMessagesCmd := &cobra.Command{
+		Use:   "messages <task-id>",
+		Short: "Task 메시지 목록 조회",
+		Long:  "Task에 추가된 메시지 목록을 조회합니다.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTaskMessages(logger, args[0])
+		},
+	}
+
 	taskCmd.AddCommand(taskCreateCmd)
 	taskCmd.AddCommand(taskListCmd)
 	taskCmd.AddCommand(taskViewCmd)
 	taskCmd.AddCommand(taskUpdateStatusCmd)
 	taskCmd.AddCommand(taskCancelCmd)
+	taskCmd.AddCommand(taskSendCmd)
+	taskCmd.AddCommand(taskAddMessageCmd)
+	taskCmd.AddCommand(taskMessagesCmd)
 
 	return taskCmd
 }
 
-func runTaskCreate(logger *zap.Logger, agentName, taskID string) error {
+func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
@@ -93,12 +131,23 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID string) error {
 	}
 	defer cleanup()
 
-	if err := ctrl.CreateTask(ctx, agentName, taskID); err != nil {
+	if err := ctrl.CreateTask(ctx, agentName, taskID, prompt); err != nil {
 		return fmt.Errorf("task 생성 실패: %w", err)
 	}
 
-	fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
+	if prompt != "" {
+		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s, Prompt: %s)\n", taskID, agentName, truncateString(prompt, 50))
+	} else {
+		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
+	}
 	return nil
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }
 
 func runTaskList(logger *zap.Logger, agentName string) error {
@@ -159,6 +208,9 @@ func runTaskView(logger *zap.Logger, taskID string) error {
 	fmt.Printf("Task ID:     %s\n", task.TaskID)
 	fmt.Printf("Agent ID:    %s\n", task.AgentID)
 	fmt.Printf("상태:        %s\n", task.Status)
+	if task.Prompt != "" {
+		fmt.Printf("프롬프트:    %s\n", task.Prompt)
+	}
 	fmt.Printf("생성일:      %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("수정일:      %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))
 
@@ -201,5 +253,79 @@ func runTaskUpdateStatus(logger *zap.Logger, taskID, status string) error {
 	}
 
 	fmt.Printf("✓ Task '%s' 상태 변경: %s\n", taskID, status)
+	return nil
+}
+
+func runTaskSend(logger *zap.Logger, taskID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		return fmt.Errorf("컨트롤러 초기화 실패: %w", err)
+	}
+	defer cleanup()
+
+	if err := ctrl.SendMessage(ctx, taskID); err != nil {
+		return fmt.Errorf("task 실행 실패: %w", err)
+	}
+
+	fmt.Printf("✓ Task '%s' 실행이 트리거되었습니다.\n", taskID)
+	return nil
+}
+
+func runTaskAddMessage(logger *zap.Logger, taskID, message string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		return fmt.Errorf("컨트롤러 초기화 실패: %w", err)
+	}
+	defer cleanup()
+
+	if err := ctrl.AddMessage(ctx, taskID, "user", message); err != nil {
+		return fmt.Errorf("메시지 추가 실패: %w", err)
+	}
+
+	fmt.Printf("✓ Task '%s'에 메시지가 추가되었습니다.\n", taskID)
+	return nil
+}
+
+func runTaskMessages(logger *zap.Logger, taskID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	ctrl, cleanup, err := newController(logger)
+	if err != nil {
+		return fmt.Errorf("컨트롤러 초기화 실패: %w", err)
+	}
+	defer cleanup()
+
+	messages, err := ctrl.ListMessages(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("메시지 목록 조회 실패: %w", err)
+	}
+
+	if len(messages) == 0 {
+		fmt.Printf("Task '%s'에 메시지가 없습니다.\n", taskID)
+		return nil
+	}
+
+	// 테이블 형식 출력
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "INDEX\tROLE\tFILE PATH\tCREATED")
+	_, _ = fmt.Fprintln(w, "-----\t----\t---------\t-------")
+
+	for _, msg := range messages {
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
+			msg.ConversationIndex,
+			msg.Role,
+			truncateString(msg.FilePath, 40),
+			msg.CreatedAt.Format("2006-01-02 15:04"),
+		)
+	}
+	_ = w.Flush()
+
 	return nil
 }

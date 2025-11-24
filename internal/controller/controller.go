@@ -193,8 +193,9 @@ func (c *Controller) ValidateAgent(agent string) error {
 	return nil
 }
 
-// CreateTask는 새로운 작업을 생성합니다.
-func (c *Controller) CreateTask(ctx context.Context, agentID, taskID string) error {
+// CreateTask는 프롬프트와 함께 새로운 작업을 생성합니다.
+// 생성 후 SendMessage를 호출하기 전까지 실행되지 않습니다.
+func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt string) error {
 	c.logger.Info("Creating task",
 		zap.String("agent_id", agentID),
 		zap.String("task_id", taskID),
@@ -215,6 +216,7 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID string) err
 	task := &storage.Task{
 		TaskID:  taskID,
 		AgentID: agentID,
+		Prompt:  prompt,
 		Status:  storage.TaskStatusPending,
 	}
 
@@ -316,6 +318,7 @@ func (c *Controller) ListTasksByAgent(ctx context.Context, agentID string) ([]st
 type TaskInfo struct {
 	TaskID    string
 	AgentID   string
+	Prompt    string
 	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -342,6 +345,7 @@ func (c *Controller) GetTaskInfo(ctx context.Context, taskID string) (*TaskInfo,
 	info := &TaskInfo{
 		TaskID:    task.TaskID,
 		AgentID:   task.AgentID,
+		Prompt:    task.Prompt,
 		Status:    task.Status,
 		CreatedAt: task.CreatedAt,
 		UpdatedAt: task.UpdatedAt,
@@ -431,4 +435,134 @@ func (c *Controller) ListAgentsWithInfo(ctx context.Context) ([]*AgentInfo, erro
 		zap.Int("count", len(agents)),
 	)
 	return agents, nil
+}
+
+// AddMessage adds a message to an existing task without executing it.
+// The message will be stored and can be sent later using SendMessage.
+func (c *Controller) AddMessage(ctx context.Context, taskID, role, content string) error {
+	c.logger.Info("Adding message to task",
+		zap.String("task_id", taskID),
+		zap.String("role", role),
+	)
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 존재 여부 확인
+	if _, err := c.repo.GetTask(ctx, taskID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// 메시지를 파일로 저장하고 인덱스 생성
+	filePath := c.saveMessageToFile(taskID, content)
+	if _, err := c.repo.AppendMessageIndex(ctx, taskID, role, filePath); err != nil {
+		c.logger.Error("Failed to add message", zap.Error(err))
+		return err
+	}
+
+	c.logger.Info("Message added successfully",
+		zap.String("task_id", taskID),
+		zap.String("role", role),
+	)
+	return nil
+}
+
+// SendMessage triggers the execution of a task.
+// This method should be called after creating a task and optionally adding messages.
+// The actual execution will be handled by the RunnerManager (to be implemented).
+func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
+	c.logger.Info("Sending message for task",
+		zap.String("task_id", taskID),
+	)
+
+	if c.repo == nil {
+		return fmt.Errorf("controller: repository is not configured")
+	}
+
+	// Task 조회
+	task, err := c.repo.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("task not found: %s", taskID)
+		}
+		return err
+	}
+
+	// 이미 실행 중인 경우 에러
+	if task.Status == storage.TaskStatusRunning {
+		return fmt.Errorf("task is already running: %s", taskID)
+	}
+
+	// 완료된 작업은 재실행 불가
+	if task.Status == storage.TaskStatusCompleted || task.Status == storage.TaskStatusFailed {
+		return fmt.Errorf("task is already finished: %s (status: %s)", taskID, task.Status)
+	}
+
+	// 메시지 목록 조회
+	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to list messages: %w", err)
+	}
+
+	// 프롬프트나 메시지가 없으면 에러
+	if task.Prompt == "" && len(messages) == 0 {
+		return fmt.Errorf("no prompt or messages to send for task: %s", taskID)
+	}
+
+	// 상태를 running으로 변경
+	if err := c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusRunning); err != nil {
+		c.logger.Error("Failed to update task status", zap.Error(err))
+		return err
+	}
+
+	c.logger.Info("Task execution triggered",
+		zap.String("task_id", taskID),
+		zap.String("agent_id", task.AgentID),
+		zap.Int("message_count", len(messages)),
+	)
+
+	// TODO: RunnerManager를 통해 실제 실행 트리거
+	// 현재는 상태만 변경하고, RunnerManager 연동 후 실제 실행 로직 추가
+
+	return nil
+}
+
+// ListMessages returns all messages for a task in conversation order.
+func (c *Controller) ListMessages(ctx context.Context, taskID string) ([]storage.MessageIndex, error) {
+	c.logger.Info("Listing messages for task",
+		zap.String("task_id", taskID),
+	)
+
+	if c.repo == nil {
+		return nil, fmt.Errorf("controller: repository is not configured")
+	}
+
+	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+
+	c.logger.Info("Listed messages",
+		zap.String("task_id", taskID),
+		zap.Int("count", len(messages)),
+	)
+	return messages, nil
+}
+
+// saveMessageToFile saves message content to a file and returns the file path.
+// Messages are stored in data/messages/{taskID}/{conversationIndex}.json
+func (c *Controller) saveMessageToFile(taskID, content string) string {
+	// TODO: 실제 파일 저장 로직 구현
+	// 현재는 임시로 경로만 반환
+	return fmt.Sprintf("data/messages/%s/%d.json", taskID, time.Now().UnixNano())
+}
+
+// loadMessageFromFile loads message content from a file.
+func (c *Controller) loadMessageFromFile(filePath string) (string, error) {
+	// TODO: 실제 파일 읽기 로직 구현
+	return "", fmt.Errorf("not implemented: loadMessageFromFile")
 }
