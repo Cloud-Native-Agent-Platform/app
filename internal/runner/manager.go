@@ -1,7 +1,10 @@
 package TaskRunner
 
 import (
+	"context"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
 // RunnerManager manages TaskRunner instances.
@@ -26,28 +29,27 @@ func GetRunnerManager() *RunnerManager {
 }
 
 // CreateRunner creates a new TaskRunner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent Agent) *TaskRunner {
+func (rm *RunnerManager) CreateRunner(ctx context.Context, taskId string, runtime ContainerRuntime, cfg RunnerConfig) (*TaskRunner, error) {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	runner := &TaskRunner{
-		ID:     taskId,
-		Status: "Pending", // Initial status
-		// Initialize other fields if needed
+	runner, err := NewTaskRunner(ctx, taskId, runtime, cfg, zap.NewNop())
+	if err != nil {
+		return nil, err
 	}
 	rm.runners[taskId] = runner
-	return runner
+	return runner, nil
 }
 
 // ListRunner returns a list of all TaskRunners.
-func (rm *RunnerManager) ListRunner() *[]TaskRunner {
+func (rm *RunnerManager) ListRunner() *[]*TaskRunner {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
-	runnersList := make([]TaskRunner, 0, len(rm.runners))
+	runnersList := make([]*TaskRunner, 0, len(rm.runners))
 	for _, runner := range rm.runners {
 		if runner != nil {
-			runnersList = append(runnersList, *runner)
+			runnersList = append(runnersList, runner)
 		}
 	}
 	return &runnersList

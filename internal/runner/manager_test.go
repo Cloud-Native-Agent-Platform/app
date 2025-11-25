@@ -1,6 +1,7 @@
 package TaskRunner
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,6 +9,32 @@ import (
 
 // MockAgent is a mock implementation of the Agent interface.
 type MockAgent struct{}
+
+type fakeRuntime struct {
+	started bool
+	status  RunnerStatus
+	sent    []Message
+}
+
+func (f *fakeRuntime) Start(ctx context.Context, cfg RunnerConfig) error {
+	f.started = true
+	f.status = StatusRunning
+	return nil
+}
+
+func (f *fakeRuntime) Send(ctx context.Context, msg Message) error {
+	f.sent = append(f.sent, msg)
+	return nil
+}
+
+func (f *fakeRuntime) Status(ctx context.Context) (RunnerStatus, error) {
+	return f.status, nil
+}
+
+func (f *fakeRuntime) Stop(ctx context.Context) error {
+	f.status = StatusCanceled
+	return nil
+}
 
 func TestRunnerManager_Singleton(t *testing.T) {
 	rm1 := GetRunnerManager()
@@ -25,14 +52,16 @@ func TestRunnerManager_CRUD(t *testing.T) {
 	rm.runners = make(map[string]*TaskRunner)
 	rm.mu.Unlock()
 
-	agent := &MockAgent{}
 	taskId := "task-1"
+	runtime := &fakeRuntime{}
+	cfg := RunnerConfig{Image: "test-image"}
 
 	// Create
-	runner := rm.CreateRunner(taskId, agent)
+	runner, err := rm.CreateRunner(context.Background(), taskId, runtime, cfg)
+	assert.NoError(t, err)
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
-	assert.Equal(t, "Pending", runner.Status)
+	assert.Equal(t, StatusRunning, runner.Status)
 
 	// List
 	runners := rm.ListRunner()
