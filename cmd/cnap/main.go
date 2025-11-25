@@ -117,7 +117,7 @@ func runStart(logger *zap.Logger) error {
 
 	// 서버 인스턴스 생성
 	controllerServer := controller.NewController(logger.Named("controller"), repo)
-	connectorServer := connector.NewServer(logger.Named("connector"))
+	connectorServer := connector.NewServer(logger.Named("connector"), controllerServer)
 
 	// 에러 채널
 	errChan := make(chan error, 2)

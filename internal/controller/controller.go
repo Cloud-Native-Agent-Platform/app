@@ -225,6 +225,8 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		return err
 	}
 
+	// TODO: Create TaskRunner with RunnerManager
+
 	c.logger.Info("Task created successfully",
 		zap.String("task_id", taskID),
 		zap.String("agent_id", agentID),
@@ -560,4 +562,3 @@ func (c *Controller) saveMessageToFile(taskID, content string) string {
 	// 현재는 임시로 경로만 반환
 	return fmt.Sprintf("data/messages/%s/%d.json", taskID, time.Now().UnixNano())
 }
-

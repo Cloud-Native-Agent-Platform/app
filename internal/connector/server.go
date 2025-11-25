@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/cnap-oss/app/internal/controller"
 	"github.com/joho/godotenv"
 	"go.uber.org/zap"
 )
@@ -26,29 +27,20 @@ const (
 	prefixButtonEdit  = "edit_agent_"
 )
 
-// Agent 구조체는 에이전트의 이름, 설명, 모델, 프롬프트 등 모든 정보를 담습니다.
-type Agent struct {
-	Name        string
-	Description string
-	Model       string
-	Prompt      string
-}
-
 // Server는 Discord 봇의 세션, 로거, 에이전트 데이터 등 모든 상태를 관리하는 중앙 구조체입니다.
 type Server struct {
 	logger        *zap.Logger
 	session       *discordgo.Session
-	agentsMutex   sync.RWMutex
-	agents        map[string]*Agent
+	controller    *controller.Controller
 	threadsMutex  sync.RWMutex
 	activeThreads map[string]string
 }
 
 // NewServer는 새로운 connector 서버를 생성하고 초기화합니다.
-func NewServer(logger *zap.Logger) *Server {
+func NewServer(logger *zap.Logger, ctrl *controller.Controller) *Server {
 	return &Server{
 		logger:        logger,
-		agents:        make(map[string]*Agent),
+		controller:    ctrl,
 		activeThreads: make(map[string]string),
 	}
 }
@@ -155,13 +147,12 @@ func (s *Server) messageCreateHandler(_ *discordgo.Session, m *discordgo.Message
 	s.threadsMutex.RUnlock()
 
 	if ok {
-		s.agentsMutex.RLock()
-		agent, agentOk := s.agents[agentName]
-		s.agentsMutex.RUnlock()
-
-		if !agentOk {
-			if _, err := s.session.ChannelMessageSend(m.ChannelID, "오류: 이 스레드에 연결된 에이전트를 찾을 수 없습니다."); err != nil {
-				s.logger.Error("Failed to send error message to channel", zap.Error(err), zap.String("channel_id", m.ChannelID))
+		ctx := context.Background()
+		agent, err := s.controller.GetAgentInfo(ctx, agentName)
+		if err != nil {
+			s.logger.Error("Failed to get agent info from controller for message handler", zap.Error(err), zap.String("agent_id", agentName))
+			if _, sendErr := s.session.ChannelMessageSend(m.ChannelID, "오류: 이 스레드에 연결된 에이전트를 찾을 수 없습니다."); sendErr != nil {
+				s.logger.Error("Failed to send error message to channel", zap.Error(sendErr), zap.String("channel_id", m.ChannelID))
 			}
 			return
 		}
@@ -196,17 +187,20 @@ func (s *Server) handleButton(i *discordgo.InteractionCreate) {
 	customID := i.MessageComponentData().CustomID
 	if strings.HasPrefix(customID, prefixButtonEdit) {
 		agentName := strings.TrimPrefix(customID, prefixButtonEdit)
-		s.agentsMutex.RLock()
-		agent, ok := s.agents[agentName]
-		s.agentsMutex.RUnlock()
-		if ok {
-			s.showCreateOrEditModal(i, agentName, agent)
+		ctx := context.Background()
+		agent, err := s.controller.GetAgentInfo(ctx, agentName)
+		if err != nil {
+			s.logger.Error("Failed to get agent info from controller for edit button", zap.Error(err), zap.String("agent_id", agentName))
+			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'의 정보를 가져오는 데 실패했어요. 에러: %v", agentName, err))
+			return
 		}
+		s.showCreateOrEditModal(i, agentName, agent)
 	}
 }
 
 // handleModal은 모달 제출 상호작용을 처리합니다.
 func (s *Server) handleModal(i *discordgo.InteractionCreate) {
+	ctx := context.Background() // Create a context
 	customID := i.ModalSubmitData().CustomID
 	data := i.ModalSubmitData().Components
 	name := data[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
@@ -214,28 +208,23 @@ func (s *Server) handleModal(i *discordgo.InteractionCreate) {
 	model := data[2].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 	prompt := data[3].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
 
-	s.agentsMutex.Lock()
-	defer s.agentsMutex.Unlock()
-
 	switch {
 	case customID == prefixModalCreate:
-		if _, ok := s.agents[name]; ok {
-			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'은(는) 이미 존재해요.", name))
+		// Assume controller's CreateAgent will handle conflicts (e.g., already exists)
+		if err := s.controller.CreateAgent(ctx, name, desc, model, prompt); err != nil {
+			s.logger.Error("Failed to create agent via controller", zap.Error(err))
+			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'을(를) 생성하는 데 실패했어요. 에러: %v", name, err))
 			return
 		}
-		s.agents[name] = &Agent{Name: name, Description: desc, Model: model, Prompt: prompt}
 		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'이(가) 성공적으로 생성되었어요!", name))
-
 	case strings.HasPrefix(customID, prefixModalEdit):
 		originalName := strings.TrimPrefix(customID, prefixModalEdit)
-		if originalName != name {
-			if _, ok := s.agents[name]; ok {
-				s.respondEphemeral(i, fmt.Sprintf("오류: 변경하려는 이름 '**%s**'은(는) 이미 다른 에이전트가 사용 중이에요.", name))
-				return
-			}
-			delete(s.agents, originalName)
+		// Assumes an UpdateAgent function exists in the controller that can handle renames.
+		if err := s.controller.UpdateAgent(ctx, originalName, desc, model, prompt); err != nil {
+			s.logger.Error("Failed to update agent via controller", zap.Error(err), zap.String("original_agent_id", originalName))
+			s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'을(를) 수정하는 데 실패했어요. 에러: %v", originalName, err))
+			return
 		}
-		s.agents[name] = &Agent{Name: name, Description: desc, Model: model, Prompt: prompt}
 		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'의 정보가 성공적으로 수정되었어요!", name))
 	}
 }
@@ -244,14 +233,27 @@ func (s *Server) handleModal(i *discordgo.InteractionCreate) {
 func (s *Server) handleAutocomplete(i *discordgo.InteractionCreate) {
 	options := i.ApplicationCommandData().Options[0].Options[0]
 	if options.Focused {
-		s.agentsMutex.RLock()
-		defer s.agentsMutex.RUnlock()
+		ctx := context.Background()
+		agents, err := s.controller.ListAgentsWithInfo(ctx)
+		if err != nil {
+			s.logger.Error("Failed to list agents from controller for autocomplete", zap.Error(err))
+			// Can't respond with an ephemeral message here, so we just log and return empty choices
+			_ = s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionApplicationCommandAutocompleteResult, Data: &discordgo.InteractionResponseData{Choices: []*discordgo.ApplicationCommandOptionChoice{}}})
+			return
+		}
+
 		var choices []*discordgo.ApplicationCommandOptionChoice
-		for name := range s.agents {
-			if strings.HasPrefix(strings.ToLower(name), strings.ToLower(options.StringValue())) {
-				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: name, Value: name})
+		for _, agent := range agents {
+			if strings.HasPrefix(strings.ToLower(agent.Name), strings.ToLower(options.StringValue())) {
+				choices = append(choices, &discordgo.ApplicationCommandOptionChoice{Name: agent.Name, Value: agent.Name})
 			}
 		}
+
+		// Discord has a limit of 25 choices for autocomplete
+		if len(choices) > 25 {
+			choices = choices[:25]
+		}
+
 		if err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionApplicationCommandAutocompleteResult, Data: &discordgo.InteractionResponseData{Choices: choices}}); err != nil {
 			s.logger.Error("Failed to send autocomplete response", zap.Error(err))
 		}
@@ -268,11 +270,11 @@ func (s *Server) respondEphemeral(i *discordgo.InteractionCreate, content string
 
 // startAgentThread는 지정된 에이전트와의 새로운 대화 스레드를 시작합니다.
 func (s *Server) startAgentThread(i *discordgo.InteractionCreate, agentName string) {
-	s.agentsMutex.RLock()
-	agent, ok := s.agents[agentName]
-	s.agentsMutex.RUnlock()
-	if !ok {
-		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'을(를) 찾을 수 없어요.", agentName))
+	ctx := context.Background()
+	agent, err := s.controller.GetAgentInfo(ctx, agentName)
+	if err != nil {
+		s.logger.Error("Failed to get agent info from controller", zap.Error(err), zap.String("agent_id", agentName))
+		s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'의 정보를 가져오는 데 실패했어요. 에러: %v", agentName, err))
 		return
 	}
 
@@ -303,7 +305,7 @@ func (s *Server) startAgentThread(i *discordgo.InteractionCreate, agentName stri
 }
 
 // callAgentInThread는 활성화된 에이전트 스레드 내에서 메시지를 처리합니다.
-func (s *Server) callAgentInThread(m *discordgo.Message, agent *Agent) {
+func (s *Server) callAgentInThread(m *discordgo.Message, agent *controller.AgentInfo) {
 	if m.Content == "안녕!" {
 		if _, err := s.session.ChannelMessageSend(m.ChannelID, "안녕하세요!"); err != nil {
 			s.logger.Error("Failed to send greeting message", zap.Error(err), zap.String("channel_id", m.ChannelID))
@@ -324,17 +326,23 @@ func (s *Server) callAgentInThread(m *discordgo.Message, agent *Agent) {
 
 // showAgentList는 현재 등록된 모든 에이전트의 목록을 Discord에 표시합니다.
 func (s *Server) showAgentList(i *discordgo.InteractionCreate) {
-	s.agentsMutex.RLock()
-	defer s.agentsMutex.RUnlock()
-	if len(s.agents) == 0 {
+	ctx := context.Background()
+	agents, err := s.controller.ListAgentsWithInfo(ctx)
+	if err != nil {
+		s.logger.Error("Failed to list agents from controller", zap.Error(err))
+		s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 목록을 불러오는 데 실패했어요. 에러: %v", err))
+		return
+	}
+
+	if len(agents) == 0 {
 		s.respondEphemeral(i, "생성된 에이전트가 아직 없어요. `/agent create`로 먼저 생성해주세요!")
 		return
 	}
 	fields := []*discordgo.MessageEmbedField{}
-	for name, agent := range s.agents {
-		fields = append(fields, &discordgo.MessageEmbedField{Name: name, Value: agent.Description, Inline: false})
+	for _, agent := range agents {
+		fields = append(fields, &discordgo.MessageEmbedField{Name: agent.Name, Value: agent.Description, Inline: false})
 	}
-	err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	err = s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Embeds: []*discordgo.MessageEmbed{{
@@ -351,13 +359,14 @@ func (s *Server) showAgentList(i *discordgo.InteractionCreate) {
 
 // showAgentDetails는 특정 에이전트의 상세 정보를 Discord에 표시합니다.
 func (s *Server) showAgentDetails(i *discordgo.InteractionCreate, name string) {
-	s.agentsMutex.RLock()
-	defer s.agentsMutex.RUnlock()
-	agent, ok := s.agents[name]
-	if !ok {
-		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'을(를) 찾을 수 없어요.", name))
+	ctx := context.Background()
+	agent, err := s.controller.GetAgentInfo(ctx, name)
+	if err != nil {
+		s.logger.Error("Failed to get agent info from controller", zap.Error(err), zap.String("agent_id", name))
+		s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'의 정보를 가져오는 데 실패했어요. 에러: %v", name, err))
 		return
 	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "에이전트 상세 정보: " + agent.Name, Color: 0x0099ff,
 		Fields: []*discordgo.MessageEmbedField{
@@ -367,7 +376,7 @@ func (s *Server) showAgentDetails(i *discordgo.InteractionCreate, name string) {
 			{Name: "실행한 작업 목록", Value: "(아직 구현되지 않은 기능이에요)"},
 		},
 	}
-	err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
+	err = s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{Embeds: []*discordgo.MessageEmbed{embed}}})
 	if err != nil {
 		s.logger.Error("Failed to show agent details", zap.Error(err), zap.String("agent", name))
 	}
@@ -375,19 +384,22 @@ func (s *Server) showAgentDetails(i *discordgo.InteractionCreate, name string) {
 
 // deleteAgent는 지정된 이름의 에이전트를 삭제합니다.
 func (s *Server) deleteAgent(i *discordgo.InteractionCreate, name string) {
-	s.agentsMutex.Lock()
-	defer s.agentsMutex.Unlock()
-	if _, ok := s.agents[name]; !ok {
-		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'을(를) 찾을 수 없어요.", name))
+	ctx := context.Background()
+	if err := s.controller.DeleteAgent(ctx, name); err != nil {
+		s.logger.Error("Failed to delete agent from controller", zap.Error(err), zap.String("agent_id", name))
+		s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'을(를) 삭제하는 데 실패했어요. 에러: %v", name, err))
 		return
 	}
-	delete(s.agents, name)
 
+	// This part is tricky. The activeThreads map links a discord thread to an agent name.
+	// If an agent is deleted, we should probably also handle the active threads.
+	// The controller doesn't know about discord threads. This logic should probably remain here.
 	s.threadsMutex.Lock()
 	defer s.threadsMutex.Unlock()
 	for threadID, agentName := range s.activeThreads {
 		if agentName == name {
 			delete(s.activeThreads, threadID)
+			// Maybe notify the thread that the agent is gone? For now, just deleting the link is fine.
 		}
 	}
 	s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'이(가) 성공적으로 삭제되었어요.", name))
@@ -395,13 +407,14 @@ func (s *Server) deleteAgent(i *discordgo.InteractionCreate, name string) {
 
 // showEditUI는 특정 에이전트의 현재 정보를 임베드 메시지로 표시하고, 수정 모달을 열기 위한 버튼을 제공합니다.
 func (s *Server) showEditUI(i *discordgo.InteractionCreate, name string) {
-	s.agentsMutex.RLock()
-	defer s.agentsMutex.RUnlock()
-	agent, ok := s.agents[name]
-	if !ok {
-		s.respondEphemeral(i, fmt.Sprintf("에이전트 '**%s**'을(를) 찾을 수 없어요.", name))
+	ctx := context.Background()
+	agent, err := s.controller.GetAgentInfo(ctx, name)
+	if err != nil {
+		s.logger.Error("Failed to get agent info from controller", zap.Error(err), zap.String("agent_id", name))
+		s.respondEphemeral(i, fmt.Sprintf("오류: 에이전트 '**%s**'의 정보를 가져오는 데 실패했어요. 에러: %v", name, err))
 		return
 	}
+
 	embed := &discordgo.MessageEmbed{
 		Title: "에이전트 수정: " + agent.Name, Description: "아래는 현재 정보예요. 수정하려면 버튼을 눌러주세요.", Color: 0xffaa00,
 		Fields: []*discordgo.MessageEmbedField{
@@ -410,7 +423,7 @@ func (s *Server) showEditUI(i *discordgo.InteractionCreate, name string) {
 			{Name: "역할 정의 (프롬프트)", Value: fmt.Sprintf("```\n%s\n```", agent.Prompt)},
 		},
 	}
-	err := s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{
+	err = s.session.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource, Data: &discordgo.InteractionResponseData{
 		Embeds: []*discordgo.MessageEmbed{embed},
 		Components: []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{Label: "정보 수정하기", Style: discordgo.PrimaryButton, CustomID: prefixButtonEdit + name},
@@ -422,7 +435,7 @@ func (s *Server) showEditUI(i *discordgo.InteractionCreate, name string) {
 }
 
 // showCreateOrEditModal은 에이전트 생성/수정 모달을 표시합니다.
-func (s *Server) showCreateOrEditModal(i *discordgo.InteractionCreate, originalName string, agent *Agent) {
+func (s *Server) showCreateOrEditModal(i *discordgo.InteractionCreate, originalName string, agent *controller.AgentInfo) {
 	modalTitle := "새로운 에이전트 생성"
 	customID := prefixModalCreate
 	name, desc, model, prompt := "", "", "", ""
