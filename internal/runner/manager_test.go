@@ -1,4 +1,4 @@
-package runner
+package TaskRunner
 
 import (
 	"testing"
@@ -18,7 +18,7 @@ func TestRunnerManager_Singleton(t *testing.T) {
 
 func TestRunnerManager_CRUD(t *testing.T) {
 	rm := GetRunnerManager()
-	
+
 	// Ensure clean state for test (though singleton persists, so we might need to clear it if tests run in same process)
 	// Since we can't easily reset the singleton once, we just work with what we have or clear the map manually.
 	rm.mu.Lock()

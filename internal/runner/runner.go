@@ -14,8 +14,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// Agent represents an agent interface (placeholder for now).
+type Agent interface{}
+
 // TaskRunner는 short-living 에이전트 실행을 담당합니다.
 type TaskRunner struct {
+	ID     string
+	Status string
 	logger *zap.Logger
 	apiKey string
 }
