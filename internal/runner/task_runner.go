@@ -1,26 +1,46 @@
-package runner
+package taskrunner
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
-// TaskRunner는 Task 실행을 위한 인터페이스입니다.
-type TaskRunner interface {
-	// Run은 주어진 메시지들로 AI API를 호출하고 결과를 반환합니다.
-	Run(ctx context.Context, req *RunRequest) (*RunResult, error)
+// StatusCallback reports status changes and completion/errors back to controller.
+type StatusCallback interface {
+	OnStatusChange(taskID string, status string) error
+	OnComplete(taskID string, result *RunResult) error
+	OnError(taskID string, err error) error
 }
 
-// RunRequest는 TaskRunner 실행 요청입니다.
+// RunRequest bundles inputs for running a task.
 type RunRequest struct {
 	TaskID       string
 	Model        string
 	SystemPrompt string
 	Messages     []ChatMessage
+	Agent        AgentInfo
+	Callback     StatusCallback
 }
 
-// ensure Runner implements TaskRunner
+// TaskRunner defines the contract for task execution.
+type TaskRunner interface {
+	Run(ctx context.Context, req *RunRequest) (*RunResult, error)
+	CheckStatus(ctx context.Context) RunnerStatus
+	SendMessage(ctx context.Context, msg Message) error
+	Subscribe(o TaskRunnerObserver)
+	Unsubscribe(o TaskRunnerObserver)
+}
+
+// ensure Runner implements TaskRunner.
 var _ TaskRunner = (*Runner)(nil)
 
 // Run implements TaskRunner interface.
+// 스켈레톤 유지: 시스템 프롬프트와 메시지를 결합해 마지막 사용자 메시지를 프롬프트로 사용.
 func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("RunRequest is nil")
+	}
+
 	// 시스템 프롬프트와 메시지를 결합
 	messages := make([]ChatMessage, 0, len(req.Messages)+1)
 	if req.SystemPrompt != "" {
@@ -40,5 +60,13 @@ func (r *Runner) Run(ctx context.Context, req *RunRequest) (*RunResult, error) {
 		}
 	}
 
-	return r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
+	result, err := r.RunWithResult(ctx, req.Model, req.TaskID, prompt)
+	if req.Callback != nil {
+		if err != nil {
+			_ = req.Callback.OnError(req.TaskID, err)
+		} else {
+			_ = req.Callback.OnComplete(req.TaskID, result)
+		}
+	}
+	return result, err
 }

@@ -1,4 +1,4 @@
-package TaskRunner
+package taskrunner
 
 import (
 	"bytes"
@@ -15,8 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Agent represents an agent interface (placeholder for now).
-type Agent interface{}
+// AgentInfo represents minimal agent metadata.
+type AgentInfo struct {
+	AgentID string
+	Model   string
+	Prompt  string
+}
 
 // RunnerStatus represents the lifecycle status of a task runner.
 type RunnerStatus string
@@ -58,8 +62,8 @@ type ContainerRuntime interface {
 	Stop(ctx context.Context) error
 }
 
-// TaskRunner는 short-living 에이전트 실행을 담당합니다.
-type TaskRunner struct {
+// Runner는 short-living 에이전트 실행을 담당합니다.
+type Runner struct {
 	ID        string
 	Status    RunnerStatus
 	logger    *zap.Logger
@@ -102,8 +106,8 @@ type OpenCodeResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// NewTaskRunner는 새로운 TaskRunner를 생성하고 컨테이너 런타임을 시작합니다.
-func NewTaskRunner(ctx context.Context, id string, runtime ContainerRuntime, cfg RunnerConfig, logger *zap.Logger) (*TaskRunner, error) {
+// NewRunner는 새로운 Runner를 생성하고 컨테이너 런타임을 시작합니다.
+func NewRunner(ctx context.Context, id string, runtime ContainerRuntime, cfg RunnerConfig, logger *zap.Logger) (*Runner, error) {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -113,7 +117,7 @@ func NewTaskRunner(ctx context.Context, id string, runtime ContainerRuntime, cfg
 		logger.Warn("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다 (RunWithResult 사용 시 필요)")
 	}
 
-	r := &TaskRunner{
+	r := &Runner{
 		ID:        id,
 		Status:    StatusPending,
 		logger:    logger,
@@ -136,7 +140,7 @@ func NewTaskRunner(ctx context.Context, id string, runtime ContainerRuntime, cfg
 }
 
 // RunWithResult는 프롬프트를 OpenCode Zen API의 chat/completions 엔드포인트로 보내고 결과를 반환합니다.
-func (r *TaskRunner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
+func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
 	if r.logger == nil {
 		r.logger = zap.NewNop()
 	}
@@ -229,7 +233,7 @@ func (r *TaskRunner) RunWithResult(ctx context.Context, model, name, prompt stri
 }
 
 // CheckStatus는 런타임으로부터 상태를 조회하고 반환합니다.
-func (r *TaskRunner) CheckStatus(ctx context.Context) RunnerStatus {
+func (r *Runner) CheckStatus(ctx context.Context) RunnerStatus {
 	if r.logger == nil {
 		r.logger = zap.NewNop()
 	}
@@ -251,7 +255,7 @@ func (r *TaskRunner) CheckStatus(ctx context.Context) RunnerStatus {
 }
 
 // SendMessage는 컨테이너/에이전트로 메시지를 전달합니다.
-func (r *TaskRunner) SendMessage(ctx context.Context, msg Message) error {
+func (r *Runner) SendMessage(ctx context.Context, msg Message) error {
 	if r.runtime == nil {
 		return fmt.Errorf("runtime이 초기화되지 않았습니다")
 	}
@@ -264,7 +268,7 @@ func (r *TaskRunner) SendMessage(ctx context.Context, msg Message) error {
 }
 
 // Subscribe는 옵저버를 등록합니다.
-func (r *TaskRunner) Subscribe(o TaskRunnerObserver) {
+func (r *Runner) Subscribe(o TaskRunnerObserver) {
 	if o == nil {
 		return
 	}
@@ -274,7 +278,7 @@ func (r *TaskRunner) Subscribe(o TaskRunnerObserver) {
 }
 
 // Unsubscribe는 옵저버 등록을 해제합니다.
-func (r *TaskRunner) Unsubscribe(o TaskRunnerObserver) {
+func (r *Runner) Unsubscribe(o TaskRunnerObserver) {
 	if o == nil {
 		return
 	}
@@ -297,7 +301,7 @@ type RunResult struct {
 	Error   error
 }
 
-func (r *TaskRunner) setStatus(status RunnerStatus) {
+func (r *Runner) setStatus(status RunnerStatus) {
 	r.mu.Lock()
 	changed := r.Status != status
 	r.Status = status
@@ -311,7 +315,7 @@ func (r *TaskRunner) setStatus(status RunnerStatus) {
 	}
 }
 
-func (r *TaskRunner) notifyMessage(msg Message) {
+func (r *Runner) notifyMessage(msg Message) {
 	r.mu.Lock()
 	observers := append([]TaskRunnerObserver(nil), r.observers...)
 	r.mu.Unlock()
