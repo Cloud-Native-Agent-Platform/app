@@ -211,7 +211,7 @@ func (c *Controller) ValidateAgent(agent string) error {
 
 // CreateTask는 프롬프트와 함께 새로운 작업을 생성합니다.
 // 생성 후 SendMessage를 호출하기 전까지 실행되지 않습니다.
-func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prompt string) error {
+func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prompt string, model *string) error {
 	c.logger.Info("Creating task",
 		zap.String("agent_id", agentID),
 		zap.String("task_id", taskID),
@@ -223,7 +223,8 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prom
 	}
 
 	// Agent 존재 여부 확인
-	if _, err := c.repo.GetAgent(ctx, agentID); err != nil {
+	agent, err := c.repo.GetAgent(ctx, agentID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("agent not found: %s", agentID)
 		}
@@ -240,6 +241,7 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prom
 		AgentID: agentID,
 		Name:    name,
 		Prompt:  prompt,
+		Model:   model,
 		Status:  storage.TaskStatusPending,
 	}
 
@@ -248,17 +250,10 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prom
 		return err
 	}
 
-	// Agent 정보 조회
-	agent, err := c.repo.GetAgent(ctx, agentID)
-	if err != nil {
-		c.logger.Error("Failed to get agent info", zap.Error(err))
-		return err
-	}
-
 	// RunnerManager에 TaskRunner 생성 (callback 주입)
 	agentInfo := taskrunner.AgentInfo{
 		AgentID: agentID,
-		Model:   agent.Model,
+		Model:   c.resolveModel(agent.Model, model),
 		Prompt:  agent.Prompt,
 	}
 	runner := c.runnerManager.CreateRunner(taskID, agentInfo, c)
@@ -751,10 +746,13 @@ func (c *Controller) executeTask(ctx context.Context, taskID string, task *stora
 		})
 	}
 
+	// 모델 결정: Task.Model이 있으면 우선, 없으면 Agent.Model 사용
+	model := c.resolveModel(agent.Model, task.Model)
+
 	// RunRequest 구성
 	req := &taskrunner.RunRequest{
 		TaskID:       taskID,
-		Model:        agent.Model,
+		Model:        model,
 		SystemPrompt: agent.Prompt,
 		Messages:     chatMessages,
 	}
@@ -943,6 +941,14 @@ func (c *Controller) readMessageFromFile(filePath string) (string, error) {
 	}
 
 	return content, nil
+}
+
+// resolveModel returns task model if provided, otherwise agent model.
+func (c *Controller) resolveModel(agentModel string, taskModel *string) string {
+	if taskModel != nil && *taskModel != "" {
+		return *taskModel
+	}
+	return agentModel
 }
 
 // ensure Controller implements StatusCallback

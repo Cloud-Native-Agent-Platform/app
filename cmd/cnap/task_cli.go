@@ -22,17 +22,23 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	// task create
 	var createName string
 	var createPrompt string
+	var createModel string
 	taskCreateCmd := &cobra.Command{
 		Use:   "create <agent-name> <task-id>",
 		Short: "새로운 Task 생성",
 		Long:  "특정 Agent에 새로운 Task를 생성합니다.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCreate(logger, args[0], args[1], createName, createPrompt)
+			var model *string
+			if createModel != "" {
+				model = &createModel
+			}
+			return runTaskCreate(logger, args[0], args[1], createName, createPrompt, model)
 		},
 	}
 	taskCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "Task 이름 (생략 시 task-id 사용)")
 	taskCreateCmd.Flags().StringVarP(&createPrompt, "prompt", "p", "", "Task 초기 프롬프트")
+	taskCreateCmd.Flags().StringVarP(&createModel, "model", "m", "", "사용할 모델 (Agent 모델 오버라이드)")
 
 	// task list
 	taskListCmd := &cobra.Command{
@@ -135,7 +141,7 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	return taskCmd
 }
 
-func runTaskCreate(logger *zap.Logger, agentName, taskID, name, prompt string) error {
+func runTaskCreate(logger *zap.Logger, agentName, taskID, name, prompt string, model *string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
@@ -145,7 +151,7 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, name, prompt string) e
 	}
 	defer cleanup()
 
-	if err := ctrl.CreateTask(ctx, agentName, taskID, name, prompt); err != nil {
+	if err := ctrl.CreateTask(ctx, agentName, taskID, name, prompt, model); err != nil {
 		return fmt.Errorf("task 생성 실패: %w", err)
 	}
 
@@ -158,6 +164,9 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, name, prompt string) e
 	fmt.Printf("✓ Task '%s' (%s) 생성 완료 (Agent: %s)\n", taskID, displayName, agentName)
 	if prompt != "" {
 		fmt.Printf("  Prompt: %s\n", truncateString(prompt, 50))
+	}
+	if model != nil && *model != "" {
+		fmt.Printf("  Model: %s\n", *model)
 	}
 	return nil
 }
