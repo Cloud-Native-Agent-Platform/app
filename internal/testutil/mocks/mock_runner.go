@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cnap-oss/app/internal/runner"
+	taskrunner "github.com/cnap-oss/app/internal/runner"
 )
 
 // MockRunner는 테스트용 TaskRunner 구현입니다.
@@ -16,7 +16,7 @@ type MockRunner struct {
 	Errors map[string]error
 
 	// Calls는 Run 호출 기록입니다.
-	Calls []*runner.RunRequest
+	Calls []*taskrunner.RunRequest
 
 	// DefaultResponse는 Responses에 없는 경우 사용할 기본 응답입니다.
 	DefaultResponse string
@@ -27,16 +27,16 @@ func NewMockRunner() *MockRunner {
 	return &MockRunner{
 		Responses:       make(map[string]string),
 		Errors:          make(map[string]error),
-		Calls:           make([]*runner.RunRequest, 0),
+		Calls:           make([]*taskrunner.RunRequest, 0),
 		DefaultResponse: "Mock response",
 	}
 }
 
 // ensure MockRunner implements TaskRunner
-var _ runner.TaskRunner = (*MockRunner)(nil)
+var _ taskrunner.TaskRunner = (*MockRunner)(nil)
 
 // Run implements TaskRunner interface.
-func (m *MockRunner) Run(ctx context.Context, req *runner.RunRequest) (*runner.RunResult, error) {
+func (m *MockRunner) Run(ctx context.Context, req *taskrunner.RunRequest) (*taskrunner.RunResult, error) {
 	// 호출 기록
 	m.Calls = append(m.Calls, req)
 
@@ -51,7 +51,7 @@ func (m *MockRunner) Run(ctx context.Context, req *runner.RunRequest) (*runner.R
 		response = resp
 	}
 
-	return &runner.RunResult{
+	return &taskrunner.RunResult{
 		Agent:   req.Model,
 		Name:    req.TaskID,
 		Success: true,
@@ -81,7 +81,7 @@ func (m *MockRunner) GetCallCount() int {
 }
 
 // GetLastCall은 마지막 Run 호출을 반환합니다.
-func (m *MockRunner) GetLastCall() *runner.RunRequest {
+func (m *MockRunner) GetLastCall() *taskrunner.RunRequest {
 	if len(m.Calls) == 0 {
 		return nil
 	}
@@ -90,5 +90,5 @@ func (m *MockRunner) GetLastCall() *runner.RunRequest {
 
 // Reset은 모든 호출 기록을 초기화합니다.
 func (m *MockRunner) Reset() {
-	m.Calls = make([]*runner.RunRequest, 0)
+	m.Calls = make([]*taskrunner.RunRequest, 0)
 }
