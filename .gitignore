@@ -56,3 +56,4 @@ __debug_bin
 # Configuration overrides
 configs/local.yaml
 configs/production.yaml
+data/

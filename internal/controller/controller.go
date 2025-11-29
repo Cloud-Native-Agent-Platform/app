@@ -2,10 +2,14 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
+	taskrunner "github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/storage"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -13,15 +17,17 @@ import (
 
 // Controller는 에이전트 생성 및 관리를 담당하며, supervisor 기능도 포함합니다.
 type Controller struct {
-	logger *zap.Logger
-	repo   *storage.Repository
+	logger        *zap.Logger
+	repo          *storage.Repository
+	runnerManager *taskrunner.RunnerManager
 }
 
 // NewController는 새로운 Controller를 생성합니다.
 func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 	return &Controller{
-		logger: logger,
-		repo:   repo,
+		logger:        logger,
+		repo:          repo,
+		runnerManager: taskrunner.GetRunnerManager(),
 	}
 }
 
@@ -224,8 +230,24 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		c.logger.Error("Failed to create task", zap.Error(err))
 		return err
 	}
-	
-	// TODO: Create TaskRunner with RunnerManager
+
+	// Agent 정보 조회
+	agent, err := c.repo.GetAgent(ctx, agentID)
+	if err != nil {
+		c.logger.Error("Failed to get agent info", zap.Error(err))
+		return err
+	}
+
+	// RunnerManager에 TaskRunner 생성
+	agentInfo := taskrunner.AgentInfo{
+		AgentID: agentID,
+		Model:   agent.Model,
+		Prompt:  agent.Prompt,
+	}
+	runner := c.runnerManager.CreateRunner(taskID, agentInfo)
+	if runner == nil {
+		return fmt.Errorf("failed to create task runner")
+	}
 
 	c.logger.Info("Task created successfully",
 		zap.String("task_id", taskID),
@@ -460,7 +482,12 @@ func (c *Controller) AddMessage(ctx context.Context, taskID, role, content strin
 	}
 
 	// 메시지를 파일로 저장하고 인덱스 생성
-	filePath := c.saveMessageToFile(taskID, content)
+	filePath, err := c.saveMessageToFile(ctx, taskID, role, content)
+	if err != nil {
+		c.logger.Error("Failed to save message to file", zap.Error(err))
+		return err
+	}
+
 	if _, err := c.repo.AppendMessageIndex(ctx, taskID, role, filePath); err != nil {
 		c.logger.Error("Failed to add message", zap.Error(err))
 		return err
@@ -527,10 +554,115 @@ func (c *Controller) SendMessage(ctx context.Context, taskID string) error {
 		zap.Int("message_count", len(messages)),
 	)
 
-	// TODO: RunnerManager를 통해 실제 실행 트리거
-	// 현재는 상태만 변경하고, RunnerManager 연동 후 실제 실행 로직 추가
+	// RunnerManager를 통해 실제 실행 트리거
+	go c.executeTask(context.Background(), taskID, task)
 
 	return nil
+}
+
+// executeTask는 Task를 비동기로 실행합니다.
+func (c *Controller) executeTask(ctx context.Context, taskID string, task *storage.Task) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.logger.Error("Task execution panicked",
+				zap.String("task_id", taskID),
+				zap.Any("panic", r),
+			)
+			// 상태를 failed로 변경
+			_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+		}
+	}()
+
+	// RunnerManager에서 TaskRunner 조회
+	runner := c.runnerManager.GetRunner(taskID)
+	if runner == nil {
+		c.logger.Error("TaskRunner not found",
+			zap.String("task_id", taskID),
+		)
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+		return
+	}
+
+	// Agent 정보 조회
+	agent, err := c.repo.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		c.logger.Error("Failed to get agent info", zap.Error(err))
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+		return
+	}
+
+	// 메시지 목록 조회 및 변환
+	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to list messages", zap.Error(err))
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+		return
+	}
+
+	// ChatMessage로 변환
+	chatMessages := make([]taskrunner.ChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+			Role:    msg.Role,
+			Content: msg.FilePath, // TODO: 파일에서 실제 content 읽기
+		})
+	}
+
+	// Prompt가 있으면 추가
+	if task.Prompt != "" {
+		chatMessages = append(chatMessages, taskrunner.ChatMessage{
+			Role:    "user",
+			Content: task.Prompt,
+		})
+	}
+
+	// RunRequest 구성
+	req := &taskrunner.RunRequest{
+		TaskID:       taskID,
+		Model:        agent.Model,
+		SystemPrompt: agent.Prompt,
+		Messages:     chatMessages,
+	}
+
+	// TaskRunner 실행
+	result, err := runner.Run(ctx, req)
+	if err != nil {
+		c.logger.Error("TaskRunner execution failed",
+			zap.String("task_id", taskID),
+			zap.Error(err),
+		)
+		_ = c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusFailed)
+
+		// 실행 완료 후 TaskRunner 정리
+		c.runnerManager.DeleteRunner(taskID)
+		return
+	}
+
+	// 결과를 파일로 저장
+	if result.Success {
+		filePath, err := c.saveMessageToFile(ctx, taskID, "assistant", result.Output)
+		if err != nil {
+			c.logger.Error("Failed to save result to file", zap.Error(err))
+		} else {
+			// MessageIndex에 추가
+			if _, err := c.repo.AppendMessageIndex(ctx, taskID, "assistant", filePath); err != nil {
+				c.logger.Error("Failed to append message index", zap.Error(err))
+			}
+		}
+	}
+
+	// 상태를 completed로 변경
+	if err := c.repo.UpsertTaskStatus(ctx, taskID, task.AgentID, storage.TaskStatusCompleted); err != nil {
+		c.logger.Error("Failed to update task status to completed", zap.Error(err))
+	}
+
+	c.logger.Info("Task execution completed",
+		zap.String("task_id", taskID),
+		zap.Bool("success", result.Success),
+	)
+
+	// 실행 완료 후 TaskRunner 정리
+	c.runnerManager.DeleteRunner(taskID)
 }
 
 // ListMessages returns all messages for a task in conversation order.
@@ -557,9 +689,55 @@ func (c *Controller) ListMessages(ctx context.Context, taskID string) ([]storage
 
 // saveMessageToFile saves message content to a file and returns the file path.
 // Messages are stored in data/messages/{taskID}/{conversationIndex}.json
-func (c *Controller) saveMessageToFile(taskID, content string) string {
-	// TODO: 실제 파일 저장 로직 구현
-	// 현재는 임시로 경로만 반환
-	return fmt.Sprintf("data/messages/%s/%d.json", taskID, time.Now().UnixNano())
+func (c *Controller) saveMessageToFile(ctx context.Context, taskID, role, content string) (string, error) {
+	// 1. 디렉토리 생성
+	dir := filepath.Join("data", "messages", taskID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		c.logger.Error("Failed to create message directory",
+			zap.String("dir", dir),
+			zap.Error(err),
+		)
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// 2. Conversation index 조회
+	messages, err := c.repo.ListMessageIndexByTask(ctx, taskID)
+	if err != nil {
+		c.logger.Error("Failed to list messages", zap.Error(err))
+		return "", fmt.Errorf("failed to list messages: %w", err)
+	}
+	index := len(messages)
+
+	// 3. JSON 파일 저장
+	filename := fmt.Sprintf("%04d.json", index)
+	filePath := filepath.Join(dir, filename)
+
+	msg := map[string]interface{}{
+		"role":      role,
+		"content":   content,
+		"timestamp": time.Now().Format(time.RFC3339),
+	}
+
+	data, err := json.MarshalIndent(msg, "", "  ")
+	if err != nil {
+		c.logger.Error("Failed to marshal message", zap.Error(err))
+		return "", fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, data, 0644); err != nil {
+		c.logger.Error("Failed to write file",
+			zap.String("path", filePath),
+			zap.Error(err),
+		)
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	c.logger.Debug("Message saved to file",
+		zap.String("task_id", taskID),
+		zap.String("role", role),
+		zap.String("path", filePath),
+	)
+
+	return filePath, nil
 }
 
