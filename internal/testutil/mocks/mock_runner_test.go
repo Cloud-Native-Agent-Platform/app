@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/cnap-oss/app/internal/runner"
+	taskrunner "github.com/cnap-oss/app/internal/runner"
 	"github.com/cnap-oss/app/internal/testutil/mocks"
 	"github.com/stretchr/testify/require"
 )
@@ -14,11 +14,11 @@ func TestMockRunner_Run(t *testing.T) {
 	mock.SetResponse("task-001", "Hello from mock!")
 
 	ctx := context.Background()
-	req := &runner.RunRequest{
+	req := &taskrunner.RunRequest{
 		TaskID:       "task-001",
 		Model:        "gpt-4",
 		SystemPrompt: "You are a helpful assistant",
-		Messages: []runner.ChatMessage{
+		Messages: []taskrunner.ChatMessage{
 			{Role: "user", Content: "Hi"},
 		},
 	}
@@ -35,7 +35,7 @@ func TestMockRunner_DefaultResponse(t *testing.T) {
 	mock.DefaultResponse = "Default response"
 
 	ctx := context.Background()
-	req := &runner.RunRequest{
+	req := &taskrunner.RunRequest{
 		TaskID: "unknown-task",
 		Model:  "gpt-4",
 	}
@@ -50,7 +50,7 @@ func TestMockRunner_Error(t *testing.T) {
 	mock.SetErrorMessage("task-fail", "API error")
 
 	ctx := context.Background()
-	req := &runner.RunRequest{
+	req := &taskrunner.RunRequest{
 		TaskID: "task-fail",
 		Model:  "gpt-4",
 	}
@@ -67,9 +67,9 @@ func TestMockRunner_CallHistory(t *testing.T) {
 	ctx := context.Background()
 
 	// 여러 번 호출
-	_, _ = mock.Run(ctx, &runner.RunRequest{TaskID: "task-1"})
-	_, _ = mock.Run(ctx, &runner.RunRequest{TaskID: "task-2"})
-	_, _ = mock.Run(ctx, &runner.RunRequest{TaskID: "task-3"})
+	_, _ = mock.Run(ctx, &taskrunner.RunRequest{TaskID: "task-1"})
+	_, _ = mock.Run(ctx, &taskrunner.RunRequest{TaskID: "task-2"})
+	_, _ = mock.Run(ctx, &taskrunner.RunRequest{TaskID: "task-3"})
 
 	require.Equal(t, 3, mock.GetCallCount())
 	require.Equal(t, "task-3", mock.GetLastCall().TaskID)

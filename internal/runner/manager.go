@@ -1,12 +1,17 @@
-package TaskRunner
+package taskrunner
 
 import (
+	"os"
 	"sync"
+
+	"go.uber.org/zap"
 )
 
-// RunnerManager manages TaskRunner instances.
+// RunnerManager manages Runner instances.
 type RunnerManager struct {
-	runners map[string]*TaskRunner
+	runners map[string]*Runner
+	logger  *zap.Logger
+	apiKey  string
 	mu      sync.RWMutex
 }
 
@@ -16,35 +21,52 @@ var (
 )
 
 // GetRunnerManager returns the singleton instance of RunnerManager.
-func GetRunnerManager() *RunnerManager {
+func GetRunnerManager(logger *zap.Logger) *RunnerManager {
 	once.Do(func() {
+		apiKey := os.Getenv("OPEN_CODE_API_KEY")
+		if apiKey == "" {
+			logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
+		}
+
 		instance = &RunnerManager{
-			runners: make(map[string]*TaskRunner),
+			runners: make(map[string]*Runner),
+			logger:  logger,
+			apiKey:  apiKey,
 		}
 	})
 	return instance
 }
 
-// CreateRunner creates a new TaskRunner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent Agent) *TaskRunner {
+// CreateRunner creates a new Runner and adds it to the manager.
+func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo, callback StatusCallback) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	runner := &TaskRunner{
-		ID:     taskId,
-		Status: "Pending", // Initial status
-		// Initialize other fields if needed
+	runner := &Runner{
+		ID:       taskId,
+		Status:   "Pending",
+		logger:   rm.logger,
+		apiKey:   rm.apiKey,
+		callback: callback,
 	}
 	rm.runners[taskId] = runner
 	return runner
 }
 
-// ListRunner returns a list of all TaskRunners.
-func (rm *RunnerManager) ListRunner() *[]TaskRunner {
+// GetRunner returns a Runner by its ID.
+func (rm *RunnerManager) GetRunner(taskId string) *Runner {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
-	runnersList := make([]TaskRunner, 0, len(rm.runners))
+	return rm.runners[taskId]
+}
+
+// ListRunner returns a list of all Runners.
+func (rm *RunnerManager) ListRunner() *[]Runner {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	runnersList := make([]Runner, 0, len(rm.runners))
 	for _, runner := range rm.runners {
 		if runner != nil {
 			runnersList = append(runnersList, *runner)
@@ -53,8 +75,8 @@ func (rm *RunnerManager) ListRunner() *[]TaskRunner {
 	return &runnersList
 }
 
-// DeleteRunner removes a TaskRunner by its ID.
-func (rm *RunnerManager) DeleteRunner(taskId string) *TaskRunner {
+// DeleteRunner removes a Runner by its ID.
+func (rm *RunnerManager) DeleteRunner(taskId string) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 

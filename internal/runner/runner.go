@@ -1,4 +1,4 @@
-package TaskRunner
+package taskrunner
 
 import (
 	"bytes"
@@ -14,15 +14,32 @@ import (
 	"go.uber.org/zap"
 )
 
-// Agent represents an agent interface (placeholder for now).
-type Agent interface{}
+// AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
+type AgentInfo struct {
+	AgentID string
+	Model   string
+	Prompt  string
+}
 
-// TaskRunner는 short-living 에이전트 실행을 담당합니다.
-type TaskRunner struct {
-	ID     string
-	Status string
-	logger *zap.Logger
-	apiKey string
+// StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
+type StatusCallback interface {
+	// OnStatusChange는 Task 상태가 변경될 때 호출됩니다.
+	OnStatusChange(taskID string, status string) error
+
+	// OnComplete는 Task가 완료될 때 호출됩니다.
+	OnComplete(taskID string, result *RunResult) error
+
+	// OnError는 Task 실행 중 에러가 발생할 때 호출됩니다.
+	OnError(taskID string, err error) error
+}
+
+// Runner는 short-living 에이전트 실행을 담당하는 TaskRunner 구현체입니다.
+type Runner struct {
+	ID       string
+	Status   string
+	logger   *zap.Logger
+	apiKey   string
+	callback StatusCallback
 }
 
 // OpenCodeRequest는 OpenCode Zen API 요청 바디입니다.
@@ -57,21 +74,21 @@ type OpenCodeResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// NewTaskRunner는 새로운 TaskRunner를 생성합니다.
-func NewTaskRunner(logger *zap.Logger) *TaskRunner {
+// NewRunner는 새로운 Runner를 생성합니다.
+func NewRunner(logger *zap.Logger) *Runner {
 	apiKey := os.Getenv("OPEN_CODE_API_KEY")
 	if apiKey == "" {
 		logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
 	}
 
-	return &TaskRunner{
+	return &Runner{
 		logger: logger,
 		apiKey: apiKey,
 	}
 }
 
 // RunWithResult는 프롬프트를 OpenCode Zen API의 chat/completions 엔드포인트로 보내고 결과를 반환합니다.
-func (r *TaskRunner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
+func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
 	promptPreview := prompt
 	if len(promptPreview) > 200 {
 		promptPreview = promptPreview[:200] + "..."
@@ -107,15 +124,54 @@ func (r *TaskRunner) RunWithResult(ctx context.Context, model, name, prompt stri
 	req.Header.Set("Authorization", "Bearer "+r.apiKey)
 
 	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("API 요청 실패: %w", err)
-	}
-	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("응답 읽기 실패: %w", err)
+	// 재시도 로직 (최대 3회)
+	maxRetries := 3
+	var resp *http.Response
+	var bodyBytes []byte
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err = client.Do(req)
+		if err != nil {
+			r.logger.Warn("API request failed",
+				zap.Int("attempt", attempt),
+				zap.Error(err),
+			)
+			// 네트워크 에러는 재시도
+			if attempt < maxRetries {
+				time.Sleep(time.Duration(attempt) * time.Second)
+				continue
+			}
+			return nil, fmt.Errorf("API 요청 실패 (재시도 %d회): %w", maxRetries, err)
+		}
+
+		bodyBytes, err = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("응답 읽기 실패: %w", err)
+		}
+
+		// 500번대 에러는 재시도
+		if resp.StatusCode >= 500 && attempt < maxRetries {
+			r.logger.Warn("Server error, retrying",
+				zap.Int("status_code", resp.StatusCode),
+				zap.Int("attempt", attempt),
+			)
+			time.Sleep(time.Duration(attempt) * time.Second)
+			continue
+		}
+
+		// 429 (Rate Limit)는 재시도
+		if resp.StatusCode == 429 && attempt < maxRetries {
+			r.logger.Warn("Rate limited, retrying",
+				zap.Int("attempt", attempt),
+			)
+			time.Sleep(time.Duration(attempt*2) * time.Second)
+			continue
+		}
+
+		// 성공 또는 재시도 불가능한 에러
+		break
 	}
 
 	contentType := resp.Header.Get("Content-Type")
