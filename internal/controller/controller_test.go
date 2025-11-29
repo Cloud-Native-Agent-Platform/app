@@ -78,7 +78,7 @@ func TestControllerCreateTaskWithPrompt(t *testing.T) {
 	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Chatbot agent", "gpt-4", "You are a helpful assistant"))
 
 	// Task 생성 with prompt
-	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "task-001", "Hello, how are you?"))
+	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "task-001", "Test Task", "Hello, how are you?"))
 
 	// Task 조회
 	info, err := ctrl.GetTaskInfo(ctx, "task-001")
@@ -99,7 +99,7 @@ func TestControllerCreateTaskWithoutPrompt(t *testing.T) {
 	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
 
 	// Task 생성 without prompt
-	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", ""))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", "", ""))
 
 	info, err := ctrl.GetTaskInfo(ctx, "task-empty")
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestControllerAddMessage(t *testing.T) {
 
 	// Setup
 	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
-	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "Initial prompt"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "", "Initial prompt"))
 
 	// Add messages
 	require.NoError(t, ctrl.AddMessage(ctx, "task-001", "user", "First message"))
@@ -143,7 +143,7 @@ func TestControllerSendMessage(t *testing.T) {
 
 	// Setup
 	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
-	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "Hello"))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-001", "", "Hello"))
 
 	// SendMessage should change status to running
 	require.NoError(t, ctrl.SendMessage(ctx, "task-001"))
@@ -166,7 +166,7 @@ func TestControllerSendMessageWithoutPromptOrMessages(t *testing.T) {
 
 	// Setup - Task without prompt
 	require.NoError(t, ctrl.CreateAgent(ctx, "agent-1", "Test agent", "gpt-4", "System prompt"))
-	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", ""))
+	require.NoError(t, ctrl.CreateTask(ctx, "agent-1", "task-empty", "", ""))
 
 	// SendMessage should fail - no prompt or messages
 	err := ctrl.SendMessage(ctx, "task-empty")
@@ -184,7 +184,7 @@ func TestControllerMultiTurnConversation(t *testing.T) {
 	require.NoError(t, ctrl.CreateAgent(ctx, "chatbot", "Friendly chatbot", "gpt-4", "You are a helpful assistant"))
 
 	// 2. Task 생성 (대화 세션)
-	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "session-001", "안녕하세요"))
+	require.NoError(t, ctrl.CreateTask(ctx, "chatbot", "session-001", "", "안녕하세요"))
 
 	// 3. 첫 번째 SendMessage
 	require.NoError(t, ctrl.SendMessage(ctx, "session-001"))

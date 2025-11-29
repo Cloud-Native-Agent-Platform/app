@@ -211,10 +211,11 @@ func (c *Controller) ValidateAgent(agent string) error {
 
 // CreateTask는 프롬프트와 함께 새로운 작업을 생성합니다.
 // 생성 후 SendMessage를 호출하기 전까지 실행되지 않습니다.
-func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt string) error {
+func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, name, prompt string) error {
 	c.logger.Info("Creating task",
 		zap.String("agent_id", agentID),
 		zap.String("task_id", taskID),
+		zap.String("name", name),
 	)
 
 	if c.repo == nil {
@@ -229,9 +230,15 @@ func (c *Controller) CreateTask(ctx context.Context, agentID, taskID, prompt str
 		return err
 	}
 
+	// name이 비어있으면 taskID 사용
+	if name == "" {
+		name = taskID
+	}
+
 	task := &storage.Task{
 		TaskID:  taskID,
 		AgentID: agentID,
+		Name:    name,
 		Prompt:  prompt,
 		Status:  storage.TaskStatusPending,
 	}
