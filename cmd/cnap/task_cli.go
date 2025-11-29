@@ -20,16 +20,18 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	}
 
 	// task create
+	var createName string
 	var createPrompt string
 	taskCreateCmd := &cobra.Command{
 		Use:   "create <agent-name> <task-id>",
 		Short: "새로운 Task 생성",
-		Long:  "특정 Agent에 새로운 Task를 생성합니다. --prompt 옵션으로 초기 프롬프트를 설정할 수 있습니다.",
+		Long:  "특정 Agent에 새로운 Task를 생성합니다.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runTaskCreate(logger, args[0], args[1], createPrompt)
+			return runTaskCreate(logger, args[0], args[1], createName, createPrompt)
 		},
 	}
+	taskCreateCmd.Flags().StringVarP(&createName, "name", "n", "", "Task 이름 (생략 시 task-id 사용)")
 	taskCreateCmd.Flags().StringVarP(&createPrompt, "prompt", "p", "", "Task 초기 프롬프트")
 
 	// task list
@@ -133,7 +135,7 @@ func buildTaskCommands(logger *zap.Logger) *cobra.Command {
 	return taskCmd
 }
 
-func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
+func runTaskCreate(logger *zap.Logger, agentName, taskID, name, prompt string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
@@ -143,14 +145,19 @@ func runTaskCreate(logger *zap.Logger, agentName, taskID, prompt string) error {
 	}
 	defer cleanup()
 
-	if err := ctrl.CreateTask(ctx, agentName, taskID, prompt); err != nil {
+	if err := ctrl.CreateTask(ctx, agentName, taskID, name, prompt); err != nil {
 		return fmt.Errorf("task 생성 실패: %w", err)
 	}
 
+	// 출력 메시지
+	displayName := name
+	if displayName == "" {
+		displayName = taskID
+	}
+
+	fmt.Printf("✓ Task '%s' (%s) 생성 완료 (Agent: %s)\n", taskID, displayName, agentName)
 	if prompt != "" {
-		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s, Prompt: %s)\n", taskID, agentName, truncateString(prompt, 50))
-	} else {
-		fmt.Printf("✓ Task '%s' 생성 완료 (Agent: %s)\n", taskID, agentName)
+		fmt.Printf("  Prompt: %s\n", truncateString(prompt, 50))
 	}
 	return nil
 }
