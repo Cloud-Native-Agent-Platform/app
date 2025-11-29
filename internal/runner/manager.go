@@ -39,6 +39,14 @@ func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo) *Runner {
 	return runner
 }
 
+// GetRunner returns a Runner by its ID.
+func (rm *RunnerManager) GetRunner(taskId string) *Runner {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+
+	return rm.runners[taskId]
+}
+
 // ListRunner returns a list of all Runners.
 func (rm *RunnerManager) ListRunner() *[]Runner {
 	rm.mu.RLock()
