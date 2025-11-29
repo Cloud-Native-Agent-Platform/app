@@ -1,12 +1,12 @@
-package TaskRunner
+package taskrunner
 
 import (
 	"sync"
 )
 
-// RunnerManager manages TaskRunner instances.
+// RunnerManager manages Runner instances.
 type RunnerManager struct {
-	runners map[string]*TaskRunner
+	runners map[string]*Runner
 	mu      sync.RWMutex
 }
 
@@ -19,18 +19,18 @@ var (
 func GetRunnerManager() *RunnerManager {
 	once.Do(func() {
 		instance = &RunnerManager{
-			runners: make(map[string]*TaskRunner),
+			runners: make(map[string]*Runner),
 		}
 	})
 	return instance
 }
 
-// CreateRunner creates a new TaskRunner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent Agent) *TaskRunner {
+// CreateRunner creates a new Runner and adds it to the manager.
+func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
-	runner := &TaskRunner{
+	runner := &Runner{
 		ID:     taskId,
 		Status: "Pending", // Initial status
 		// Initialize other fields if needed
@@ -39,12 +39,12 @@ func (rm *RunnerManager) CreateRunner(taskId string, agent Agent) *TaskRunner {
 	return runner
 }
 
-// ListRunner returns a list of all TaskRunners.
-func (rm *RunnerManager) ListRunner() *[]TaskRunner {
+// ListRunner returns a list of all Runners.
+func (rm *RunnerManager) ListRunner() *[]Runner {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 
-	runnersList := make([]TaskRunner, 0, len(rm.runners))
+	runnersList := make([]Runner, 0, len(rm.runners))
 	for _, runner := range rm.runners {
 		if runner != nil {
 			runnersList = append(runnersList, *runner)
@@ -53,8 +53,8 @@ func (rm *RunnerManager) ListRunner() *[]TaskRunner {
 	return &runnersList
 }
 
-// DeleteRunner removes a TaskRunner by its ID.
-func (rm *RunnerManager) DeleteRunner(taskId string) *TaskRunner {
+// DeleteRunner removes a Runner by its ID.
+func (rm *RunnerManager) DeleteRunner(taskId string) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 

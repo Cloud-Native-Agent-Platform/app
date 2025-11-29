@@ -1,4 +1,4 @@
-package TaskRunner
+package taskrunner
 
 import (
 	"bytes"
@@ -14,11 +14,27 @@ import (
 	"go.uber.org/zap"
 )
 
-// Agent represents an agent interface (placeholder for now).
-type Agent interface{}
+// AgentInfo는 에이전트 실행에 필요한 정보를 담는 구조체입니다.
+type AgentInfo struct {
+	AgentID string
+	Model   string
+	Prompt  string
+}
 
-// TaskRunner는 short-living 에이전트 실행을 담당합니다.
-type TaskRunner struct {
+// StatusCallback은 Task 실행 중 상태 변경을 Controller에 알리기 위한 콜백 인터페이스입니다.
+type StatusCallback interface {
+	// OnStatusChange는 Task 상태가 변경될 때 호출됩니다.
+	OnStatusChange(taskID string, status string) error
+
+	// OnComplete는 Task가 완료될 때 호출됩니다.
+	OnComplete(taskID string, result *RunResult) error
+
+	// OnError는 Task 실행 중 에러가 발생할 때 호출됩니다.
+	OnError(taskID string, err error) error
+}
+
+// Runner는 short-living 에이전트 실행을 담당하는 TaskRunner 구현체입니다.
+type Runner struct {
 	ID     string
 	Status string
 	logger *zap.Logger
@@ -57,21 +73,21 @@ type OpenCodeResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// NewTaskRunner는 새로운 TaskRunner를 생성합니다.
-func NewTaskRunner(logger *zap.Logger) *TaskRunner {
+// NewRunner는 새로운 Runner를 생성합니다.
+func NewRunner(logger *zap.Logger) *Runner {
 	apiKey := os.Getenv("OPEN_CODE_API_KEY")
 	if apiKey == "" {
 		logger.Fatal("환경 변수 OPEN_CODE_API_KEY가 설정되어 있지 않습니다")
 	}
 
-	return &TaskRunner{
+	return &Runner{
 		logger: logger,
 		apiKey: apiKey,
 	}
 }
 
 // RunWithResult는 프롬프트를 OpenCode Zen API의 chat/completions 엔드포인트로 보내고 결과를 반환합니다.
-func (r *TaskRunner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
+func (r *Runner) RunWithResult(ctx context.Context, model, name, prompt string) (*RunResult, error) {
 	promptPreview := prompt
 	if len(promptPreview) > 200 {
 		promptPreview = promptPreview[:200] + "..."

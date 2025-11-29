@@ -1,4 +1,4 @@
-package runner
+package taskrunner
 
 import "context"
 
@@ -16,7 +16,7 @@ type RunRequest struct {
 	Messages     []ChatMessage
 }
 
-// ensure Runner implements TaskRunner
+// ensure Runner implements TaskRunner interface
 var _ TaskRunner = (*Runner)(nil)
 
 // Run implements TaskRunner interface.
