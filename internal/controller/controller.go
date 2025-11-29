@@ -36,7 +36,7 @@ func NewController(logger *zap.Logger, repo *storage.Repository) *Controller {
 	return &Controller{
 		logger:        logger,
 		repo:          repo,
-		runnerManager: taskrunner.GetRunnerManager(),
+		runnerManager: taskrunner.GetRunnerManager(logger),
 		taskContexts:  make(map[string]*TaskContext),
 	}
 }
