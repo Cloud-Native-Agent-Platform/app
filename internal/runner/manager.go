@@ -26,13 +26,14 @@ func GetRunnerManager() *RunnerManager {
 }
 
 // CreateRunner creates a new Runner and adds it to the manager.
-func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo) *Runner {
+func (rm *RunnerManager) CreateRunner(taskId string, agent AgentInfo, callback StatusCallback) *Runner {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 
 	runner := &Runner{
-		ID:     taskId,
-		Status: "Pending", // Initial status
+		ID:       taskId,
+		Status:   "Pending", // Initial status
+		callback: callback,
 		// Initialize other fields if needed
 	}
 	rm.runners[taskId] = runner

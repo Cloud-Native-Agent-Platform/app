@@ -35,10 +35,11 @@ type StatusCallback interface {
 
 // Runner는 short-living 에이전트 실행을 담당하는 TaskRunner 구현체입니다.
 type Runner struct {
-	ID     string
-	Status string
-	logger *zap.Logger
-	apiKey string
+	ID       string
+	Status   string
+	logger   *zap.Logger
+	apiKey   string
+	callback StatusCallback
 }
 
 // OpenCodeRequest는 OpenCode Zen API 요청 바디입니다.

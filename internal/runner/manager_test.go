@@ -34,8 +34,8 @@ func TestRunnerManager_CRUD(t *testing.T) {
 	agent := mockAgentInfo()
 	taskId := "task-1"
 
-	// Create
-	runner := rm.CreateRunner(taskId, agent)
+	// Create (with nil callback for testing)
+	runner := rm.CreateRunner(taskId, agent, nil)
 	assert.NotNil(t, runner)
 	assert.Equal(t, taskId, runner.ID)
 	assert.Equal(t, "Pending", runner.Status)
